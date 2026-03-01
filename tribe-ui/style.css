@@ -312,31 +312,25 @@ textarea {
   gap: 20px;
 }
 
-/* ── Settings Grid (Masonry) ─────────────────────────────────────────────────── */
+/* ── Settings Grid (Grid Layout) ─────────────────────────────────────────────── */
 .settings-grid {
-  display: block;
-  column-count: 1;
-  column-gap: 24px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: start;
 }
 
 @media (min-width: 900px) {
   .settings-grid {
-    column-count: 2;
-  }
-}
-
-@media (min-width: 1400px) {
-  .settings-grid {
-    column-count: 3;
+    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
   }
 }
 
 .settings-grid .sec {
-  break-inside: avoid;
-  page-break-inside: avoid;
-  display: inline-block;
   width: 100%;
-  margin-bottom: 24px;
+  margin-bottom: 0;
+  min-width: 0;
+  /* Prevents flex/grid blowouts */
 }
 
 /* ── Section Titles ──────────────────────────────────────────────────────────── */
@@ -535,6 +529,8 @@ textarea {
 .form-textarea {
   display: block;
   width: 100%;
+  max-width: 100%;
+  /* Safety to prevent blowing out parents */
   background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -545,6 +541,7 @@ textarea {
   transition: border-color 0.15s, background 0.15s;
   appearance: none;
   -webkit-appearance: none;
+  overflow-wrap: break-word;
 }
 
 .form-input::placeholder,

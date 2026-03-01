@@ -1114,10 +1114,10 @@ const App = (() => {
         </p>
         <div id="ext-svc-list">
           ${(state.cfg.externalServices ?? []).map((s, i) => `
-          <div class="ext-svc-row" id="ext-row-${i}" style="display:grid;grid-template-columns:1fr 1.5fr 1fr auto;gap:8px;align-items:end;margin-bottom:10px">
-            <div class="field mb-0"><label class="form-label">Service name</label><input class="form-input" id="ext-name-${i}" value="${esc(s.name ?? '')}" placeholder="My CRM"></div>
-            <div class="field mb-0"><label class="form-label">Base URL</label><input class="form-input" id="ext-url-${i}" value="${esc(s.baseUrl ?? '')}" placeholder="https://api.example.com"></div>
-            <div class="field mb-0"><label class="form-label">API Key / Bearer token</label><input class="form-input" id="ext-key-${i}" type="password" value="${esc(s.apiKey ?? '')}" placeholder="••••••••"></div>
+          <div class="ext-svc-row" id="ext-row-${i}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px">
+            <div class="field mb-0" style="flex:1;min-width:140px"><label class="form-label">Service name</label><input class="form-input" id="ext-name-${i}" value="${esc(s.name ?? '')}" placeholder="My CRM"></div>
+            <div class="field mb-0" style="flex:2;min-width:200px"><label class="form-label">Base URL</label><input class="form-input" id="ext-url-${i}" value="${esc(s.baseUrl ?? '')}" placeholder="https://api.example.com"></div>
+            <div class="field mb-0" style="flex:1.5;min-width:160px"><label class="form-label">API Key / Bearer token</label><input class="form-input" id="ext-key-${i}" type="password" value="${esc(s.apiKey ?? '')}" placeholder="••••••••"></div>
             <button class="btn btn-danger btn-sm" style="margin-bottom:2px" onclick="App.removeExtSvc(${i})">✕</button>
           </div>
           <div style="margin:-4px 0 14px;">
@@ -1144,24 +1144,24 @@ const App = (() => {
         <div id="mcp-list">
           ${(state.cfg.mcpServers ?? []).map((m, i) => `
           <div style="border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:12px;background:var(--bg3)">
-            <div style="display:grid;grid-template-columns:1fr 120px auto;gap:10px;align-items:center;margin-bottom:10px">
-              <div class="field mb-0"><label class="form-label">Server name</label><input class="form-input" id="mcp-name-${i}" value="${esc(m.name ?? '')}" placeholder="e.g. github, filesystem, stripe"></div>
-              <div class="field mb-0"><label class="form-label">Enabled</label><br><label class="toggle" style="margin-top:6px"><input type="checkbox" id="mcp-on-${i}" ${m.enabled !== false ? 'checked' : ''}><span class="toggle-track"></span></label></div>
-              <button class="btn btn-danger btn-sm" style="margin-top:18px" onclick="App.removeMCP(${i})">✕ Remove</button>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:10px">
+              <div class="field mb-0" style="flex:1;min-width:200px"><label class="form-label">Server name</label><input class="form-input" id="mcp-name-${i}" value="${esc(m.name ?? '')}" placeholder="e.g. github, filesystem, stripe"></div>
+              <div class="field mb-0" style="min-width:80px"><label class="form-label">Enabled</label><br><label class="toggle" style="margin-top:6px"><input type="checkbox" id="mcp-on-${i}" ${m.enabled !== false ? 'checked' : ''}><span class="toggle-track"></span></label></div>
+              <button class="btn btn-danger btn-sm" style="margin-bottom:2px" onclick="App.removeMCP(${i})">✕ Remove</button>
             </div>
-            <div style="display:grid;grid-template-columns:120px 1fr;gap:10px;margin-bottom:10px">
-              <div class="field mb-0"><label class="form-label">Transport</label>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+              <div class="field mb-0" style="width:140px"><label class="form-label">Transport</label>
                 <select class="form-select" id="mcp-transport-${i}" onchange="App.onMCPTransportChange(${i})">
                   <option value="stdio" ${!m.transport || m.transport === 'stdio' ? 'selected' : ''}>stdio (local)</option>
                   <option value="sse"   ${m.transport === 'sse' ? 'selected' : ''}>SSE (remote)</option>
                   <option value="streamable-http" ${m.transport === 'streamable-http' ? 'selected' : ''}>HTTP (remote)</option>
                 </select>
               </div>
-              <div class="field mb-0" id="mcp-cmd-area-${i}" ${m.transport && m.transport !== 'stdio' ? 'style="display:none"' : ''}>
+              <div class="field mb-0" id="mcp-cmd-area-${i}" style="flex:1;min-width:200px;${m.transport && m.transport !== 'stdio' ? 'display:none' : ''}">
                 <label class="form-label">Command to start the server</label>
                 <input class="form-input" id="mcp-cmd-${i}" value="${esc(m.command ?? '')}" placeholder="npx -y @modelcontextprotocol/server-github">
               </div>
-              <div class="field mb-0" id="mcp-url-area-${i}" ${!m.transport || m.transport === 'stdio' ? 'style="display:none"' : ''}>
+              <div class="field mb-0" id="mcp-url-area-${i}" style="flex:1;min-width:200px;${!m.transport || m.transport === 'stdio' ? 'display:none' : ''}">
                 <label class="form-label">Server URL</label>
                 <input class="form-input" id="mcp-url-${i}" value="${esc(m.url ?? '')}" placeholder="https://mcp.example.com/sse">
               </div>
