@@ -312,6 +312,33 @@ textarea {
   gap: 20px;
 }
 
+/* ── Settings Grid (Masonry) ─────────────────────────────────────────────────── */
+.settings-grid {
+  display: block;
+  column-count: 1;
+  column-gap: 24px;
+}
+
+@media (min-width: 900px) {
+  .settings-grid {
+    column-count: 2;
+  }
+}
+
+@media (min-width: 1400px) {
+  .settings-grid {
+    column-count: 3;
+  }
+}
+
+.settings-grid .sec {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  display: inline-block;
+  width: 100%;
+  margin-bottom: 24px;
+}
+
 /* ── Section Titles ──────────────────────────────────────────────────────────── */
 .sec {
   margin-bottom: 28px;

@@ -528,6 +528,7 @@ const App = (() => {
       <div class="page-sub">Every OpenClaw option, explained in plain English. All changes save directly to openclaw.json.</div>
       <div class="page-rule"></div>
     </div>
+    <div class="settings-grid">
 
     <!-- ─── CRON JOBS ──────────────────────────────────────────────────────── -->
     <div class="sec">
@@ -1177,6 +1178,7 @@ const App = (() => {
         </div>
         <div class="form-hint" style="margin-top:10px">Popular MCP servers: <code>@modelcontextprotocol/server-filesystem</code>, <code>@modelcontextprotocol/server-github</code>, <code>@modelcontextprotocol/server-postgres</code>, <code>@modelcontextprotocol/server-slack</code></div>
       </div>
+    </div>
     </div>`;
   }
 
