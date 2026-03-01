@@ -1,0 +1,119 @@
+{
+    "gateway": {
+        "title": "Gateway",
+        "summary": "The Gateway is the core process that runs everything — channels, sessions, tools, and the LLM. It runs on port 18789.",
+        "details": "The Gateway is a single long-running Node.js process. It handles all channel adapters (WhatsApp, Telegram, etc.), manages sessions, executes tools, and makes LLM calls. Think of it as the engine room. The Control UI you're looking at is served directly by the Gateway. The Gateway must be running for the agent to be active.",
+        "commonMistakes": [
+            "Exposing port 18789 directly to the internet — always use an SSH tunnel or Tailscale for remote access.",
+            "Running multiple Gateway instances simultaneously — only one should run at a time.",
+            "Forgetting to restart the Gateway after changing openclaw.json."
+        ],
+        "exampleValues": {
+            "port": "18789 (default — do not change)",
+            "bind": "loopback (keeps the UI localhost-only, which is correct)"
+        }
+    },
+    "channels": {
+        "title": "Channels",
+        "summary": "Channels are the messaging platforms the agent connects to — WhatsApp, Telegram, Slack, Discord. Each channel adapter normalises messages into a single format.",
+        "details": "Each channel adapter translates platform-specific messages into a standard format the agent understands. You can connect multiple channels simultaneously. WhatsApp (via Baileys) requires a QR scan to link. Telegram requires a bot token from @BotFather. The agent will respond across all connected channels using the same session context.",
+        "commonMistakes": [
+            "Using your personal WhatsApp number — always use a dedicated number.",
+            "Using Google Voice for WhatsApp — WhatsApp blocks most VOIP numbers.",
+            "Not setting dmPolicy to 'pairing' — this exposes the agent to unknown senders.",
+            "Forgetting to add your number to allowFrom in the WhatsApp config."
+        ],
+        "exampleValues": {
+            "allowFrom": "['+15550001234'] — your personal number in E.164 format",
+            "dmPolicy": "'pairing' (safest) or 'open' (for testing only)"
+        }
+    },
+    "whatsapp": {
+        "title": "WhatsApp",
+        "summary": "Links a WhatsApp account to the agent via QR scan. The Baileys library creates a persistent session tied to that phone number.",
+        "details": "When you run 'openclaw channels login', a QR code is displayed in terminal. Scan it with your dedicated WhatsApp phone to link the session. The session is persistent — you don't need to re-scan unless the session expires or the account is logged out. If WhatsApp flags the account, you may need to re-link. Always use a dedicated SIM, not your personal WhatsApp account.",
+        "commonMistakes": [
+            "Logging into the same WhatsApp account on another device simultaneously — this invalidates the session.",
+            "Using the same number you use personally — automated accounts risk being flagged.",
+            "Not backing up the session credentials (~/.openclaw/credentials/)."
+        ],
+        "exampleValues": {
+            "allowFrom": "['+15550001234']",
+            "dmPolicy": "'pairing'"
+        }
+    },
+    "models": {
+        "title": "Models",
+        "summary": "OpenClaw is model-agnostic. You can use Claude, GPT-4o, Gemini, DeepSeek, or local models via Ollama. The active model determines response quality and API cost.",
+        "details": "Claude Sonnet 4.5 (claude-sonnet-4-5) is the community-recommended model for tool-calling reliability. For cost savings on background/heartbeat tasks, use Claude Haiku 4.5 (claude-haiku-4-5). You can switch models per-session with /model [name]. The model in openclaw.json is the default for all sessions.",
+        "commonMistakes": [
+            "Using an expensive model (like Opus) for heartbeat checks — use Haiku for that.",
+            "Forgetting to set the ANTHROPIC_API_KEY environment variable.",
+            "Using an OpenAI model name in Anthropic format — check the model ID format from your provider."
+        ],
+        "exampleValues": {
+            "user-facing model": "anthropic/claude-sonnet-4-5",
+            "heartbeat model": "anthropic/claude-haiku-4-5",
+            "switch in session": "/model anthropic/claude-haiku-4-5"
+        }
+    },
+    "heartbeat": {
+        "title": "Heartbeat",
+        "summary": "The Heartbeat is a scheduled pulse that wakes the agent to check for pending work and proactively send updates — even without a human message.",
+        "details": "Every N minutes (configurable), the agent runs a background check: reviews memory files, checks for pending tasks, and decides whether to reach out to K-Shan. Each heartbeat fires an LLM inference call, which costs API credits even if there's nothing to do. Recommended: 60 minutes with Haiku for cost-efficiency. The /heartbeat command triggers it manually.",
+        "commonMistakes": [
+            "Setting heartbeat too short (e.g., 5 min) — this runs up API costs quickly.",
+            "Using Sonnet for heartbeat — Haiku is 10x cheaper and sufficient for status checks.",
+            "Not configuring HEARTBEAT.md — the agent needs instructions for what to check."
+        ],
+        "exampleValues": {
+            "intervalMinutes": "60 (recommended), 30 (more proactive), 120 (minimal cost)",
+            "model": "anthropic/claude-haiku-4-5"
+        }
+    },
+    "soul": {
+        "title": "Soul Files (SOUL.md / IDENTITY.md / AGENT.md)",
+        "summary": "Soul files are the agent's 'personality DNA'. They are loaded at every turn as part of the system prompt. SOUL.md contains immutable rules. IDENTITY.md defines persona. AGENT.md defines operational behaviour.",
+        "details": "These Markdown files shape every response the agent makes. They are not code — they are natural language instructions the LLM reads at the start of every turn. Changes to these files take effect on the next message (no restart needed). SOUL.md should never change without Founder authorisation. IDENTITY.md can be updated to adjust tone or introduce new personas. AGENT.md is where you tune tool-use strategy and prioritisation.",
+        "commonMistakes": [
+            "Asking the agent to rewrite SOUL.md via chat — it will (correctly) refuse.",
+            "Making SOUL.md too long — the entire file is injected into every context window.",
+            "Forgetting to save changes before expecting behaviour to update."
+        ],
+        "exampleValues": {
+            "SOUL.md location": "/Users/pro/TRIBECODEOPENCLAW/workspace/SOUL.md",
+            "IDENTITY.md location": "/Users/pro/TRIBECODEOPENCLAW/workspace/IDENTITY.md",
+            "AGENT.md location": "/Users/pro/TRIBECODEOPENCLAW/workspace/AGENT.md"
+        }
+    },
+    "skills": {
+        "title": "Skills",
+        "summary": "Skills extend the agent's capabilities. Each skill is a Markdown file that tells the agent how to use a tool or access an external service.",
+        "details": "Skills can be installed from ClawHub (community registry) or written custom. Each skill lives in the workspace/skills/ directory. Some skills require API keys (Google Calendar, Gmail, GitHub). Before installing a skill, review its SKILL.md to understand what access it requires. Official skills from the OpenClaw team are safe. Community skills should be reviewed before use.",
+        "commonMistakes": [
+            "Installing skills without reading what access they need.",
+            "Installing community skills without reviewing their SKILL.md first.",
+            "Forgetting to add required API keys after installing a skill."
+        ],
+        "exampleValues": {
+            "skills directory": "/Users/pro/TRIBECODEOPENCLAW/workspace/skills/",
+            "install via chat": "Ask the agent: 'Install the browser skill from ClawHub'",
+            "list installed": "/skills"
+        }
+    },
+    "sessions": {
+        "title": "Sessions",
+        "summary": "Sessions isolate conversation contexts. Direct WhatsApp DMs from K-Shan = main session (full trust). Group chats = isolated sessions. The agent queues messages if a run is in progress.",
+        "details": "The session manager tracks who is talking to the agent and routes to the right context. DMs from the configured owner (K-Shan) collapse into the trusted 'main' session with full tool access. Group chats each get their own isolated session with restricted permissions. If a message arrives during an active tool run, it is queued and processed in the next turn.",
+        "commonMistakes": [
+            "Not setting allowFrom so only your number can message the agent.",
+            "Expecting group chat messages to have full tool access — they don't by default.",
+            "Confusing session memory (conversation history) with persistent file memory (USER.md, task files)."
+        ],
+        "exampleValues": {
+            "main session": "Direct DM from K-Shan's WhatsApp number",
+            "reset session": "/reset",
+            "compact session": "/compact"
+        }
+    }
+}

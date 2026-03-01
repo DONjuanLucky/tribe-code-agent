@@ -1,0 +1,15 @@
+[
+  {
+    "id": "1772371810369",
+    "role": "user",
+    "text": "Hello agent, testing the new chat interface.",
+    "ts": "2026-03-01T13:30:10.369Z",
+    "userId": "tribe-ui-user"
+  },
+  {
+    "id": "1772371810380",
+    "role": "assistant",
+    "text": "[Gateway offline — start OpenClaw gateway to chat with your agent. Error: fetch failed]",
+    "ts": "2026-03-01T13:30:10.379Z"
+  }
+]

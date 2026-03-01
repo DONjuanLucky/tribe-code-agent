@@ -1,0 +1,228 @@
+[
+    {
+        "id": "status",
+        "syntax": "/status",
+        "description": "Returns a compact session status showing the active model, current token count, estimated API cost (when available), and active channel connections.",
+        "exampleOutput": "Model: claude-sonnet-4-5 | Tokens: 4,230 | Est. cost: $0.02 | Channels: WhatsApp ✓",
+        "ownerOnly": false,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Session"
+    },
+    {
+        "id": "reset",
+        "syntax": "/reset",
+        "description": "Clears the current session context and conversation memory, starting fresh. Also available as /new. Useful when the agent is confused or context is polluted.",
+        "exampleOutput": "Session reset. Starting fresh.",
+        "ownerOnly": false,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Session"
+    },
+    {
+        "id": "compact",
+        "syntax": "/compact",
+        "description": "Compacts the current session context by summarising older messages. Reduces token count without a full reset — preserves recent context.",
+        "exampleOutput": "Context compacted. Summary stored. Recent messages preserved.",
+        "ownerOnly": false,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Session"
+    },
+    {
+        "id": "help",
+        "syntax": "/help",
+        "description": "Displays all available slash commands, lists currently installed skills and their status, and provides links to documentation.",
+        "exampleOutput": "Available commands: /status, /reset, /compact, /help, /skills, /heartbeat, /model, /memory, /doctor, /config, /stop, /pause, /resume...",
+        "ownerOnly": false,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Info"
+    },
+    {
+        "id": "skills",
+        "syntax": "/skills",
+        "description": "Lists all installed skills and their current enabled/disabled state. Shows skill name, version, and whether it is active for the current session.",
+        "exampleOutput": "Installed skills:\n• browser (v1.2) ✓ enabled\n• calendar (v0.9) ✗ disabled (needs API key)",
+        "ownerOnly": false,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Skills"
+    },
+    {
+        "id": "heartbeat",
+        "syntax": "/heartbeat",
+        "description": "Manually triggers a heartbeat cycle immediately, rather than waiting for the scheduled interval. Useful for testing or getting an immediate status update.",
+        "exampleOutput": "Heartbeat triggered. Running checks... Done. No pending items found.",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat"
+        ],
+        "category": "Automation"
+    },
+    {
+        "id": "model",
+        "syntax": "/model [name]",
+        "description": "Switches the active LLM model for the current session. The change is session-scoped and does not persist across resets. Example: /model claude-haiku-4-5",
+        "exampleOutput": "Model switched to claude-haiku-4-5 for this session.",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Config"
+    },
+    {
+        "id": "memory",
+        "syntax": "/memory",
+        "description": "Displays the current contents of USER.md — what the agent knows about you, your preferences, communication style, and stored context.",
+        "exampleOutput": "USER.md contents:\n• Name: K-Shan\n• Role: Founder, Tribe Code\n• Trust Level: Absolute\n...",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat"
+        ],
+        "category": "Memory"
+    },
+    {
+        "id": "doctor",
+        "syntax": "/doctor",
+        "description": "Runs the built-in diagnostics check. Surfaces risky or misconfigured DM policies, checks channel connections, and flags any potential security or configuration issues.",
+        "exampleOutput": "Doctor report:\n✓ Gateway running on port 18789\n✓ WhatsApp linked\n⚠ DM policy set to 'open' — consider switching to 'pairing'",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat"
+        ],
+        "category": "Diagnostics"
+    },
+    {
+        "id": "config",
+        "syntax": "/config",
+        "description": "Opens a summary of current gateway configuration including active channel connections, model settings, heartbeat schedule, and workspace path.",
+        "exampleOutput": "Gateway config:\n• Model: claude-sonnet-4-5\n• Heartbeat: 60min (haiku)\n• WhatsApp: linked\n• Workspace: /Users/pro/TRIBECODEOPENCLAW/workspace",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat"
+        ],
+        "category": "Config"
+    },
+    {
+        "id": "stop",
+        "syntax": "/stop",
+        "description": "Interrupts the current agent run mid-task. Use this when the agent is running a long task and you need to cancel it immediately.",
+        "exampleOutput": "Run interrupted.",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Control"
+    },
+    {
+        "id": "pause",
+        "syntax": "/pause",
+        "description": "Pauses the heartbeat and all autonomous background activity without stopping the gateway. The agent will still respond to direct messages.",
+        "exampleOutput": "Heartbeat paused. Background activity suspended. Use /resume to re-enable.",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat"
+        ],
+        "category": "Automation"
+    },
+    {
+        "id": "resume",
+        "syntax": "/resume",
+        "description": "Re-enables the heartbeat and background activity after a /pause command. The agent returns to its normal autonomous operation schedule.",
+        "exampleOutput": "Heartbeat resumed. Background activity re-enabled.",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat"
+        ],
+        "category": "Automation"
+    },
+    {
+        "id": "verbose",
+        "syntax": "/verbose on|off",
+        "description": "Toggles verbose mode — when on, the agent includes reasoning steps and tool call details in its responses. Useful for debugging.",
+        "exampleOutput": "Verbose mode: on",
+        "ownerOnly": false,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Session"
+    },
+    {
+        "id": "think",
+        "syntax": "/think <level>",
+        "description": "Sets the thinking depth level for supported models. Levels: off | minimal | low | medium | high | xhigh. Higher levels = more reasoning = higher cost.",
+        "exampleOutput": "Thinking level set to: high",
+        "ownerOnly": false,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat",
+            "Discord",
+            "Slack"
+        ],
+        "category": "Session"
+    },
+    {
+        "id": "restart",
+        "syntax": "/restart",
+        "description": "Restarts the gateway process. Owner-only in group chats. Use this after config changes that require a restart to take effect.",
+        "exampleOutput": "Gateway restarting...",
+        "ownerOnly": true,
+        "availableChannels": [
+            "WhatsApp",
+            "Telegram",
+            "WebChat"
+        ],
+        "category": "Control"
+    }
+]
