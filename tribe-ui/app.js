@@ -6,6 +6,8 @@ const App = (() => {
     wsSelected: null, wsContent: '', gatewayOnline: false,
     antfarmInstalled: false, antfarmOutput: '', logsData: [],
     searchQ: '', cmdCategory: 'All',
+    chatModel: null,   // tracks the currently selected chat model
+    chatFiles: [],     // attached files for next send
     providers: {
       anthropic: { label: 'Anthropic', models: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'] },
       openai: { label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
@@ -35,7 +37,21 @@ const App = (() => {
     return Object.entries(state.providers).map(([k, p]) => `<option value="${k}" ${sel === k ? 'selected' : ''}>${p.label}</option>`).join('');
   }
   function modelOpts(prov, cur) {
-    return (state.providers[prov] || state.providers.anthropic).models.map(m => `<option value="${m}" ${cur?.includes(m) ? 'selected' : ''}>${m}</option>`).join('');
+    const known = (state.providers[prov] || state.providers.anthropic).models;
+    const isCustom = cur && !known.includes(cur.replace(/^[^/]+\//, ''));
+    return known.map(m => `<option value="${m}" ${cur?.includes(m) ? 'selected' : ''}>${m}</option>`).join('') +
+      `<option value="__custom" ${isCustom ? 'selected' : ''}>✏️ Type a custom model…</option>`;
+  }
+
+  function modelCustomInput(selectId, cur) {
+    // Returns an input box that appears below the select when __custom is chosen
+    const known = Object.values(state.providers).flatMap(p => p.models);
+    const isCustom = cur && !known.includes(cur.replace(/^[^/]+\//, ''));
+    return `<input class="form-input" id="${selectId}-custom"
+      style="margin-top:6px;${isCustom ? '' : 'display:none'}"
+      placeholder="e.g. anthropic/claude-opus-4-5 or meta-llama/llama-70b"
+      value="${esc(isCustom ? (cur ?? '') : '')}"
+      oninput="this.dataset.dirty='1'">`;
   }
 
   async function api(method, path, body) {
@@ -103,13 +119,11 @@ const App = (() => {
       </div>
       <div class="stat-card" onclick="App.showView('channels')">
         <div class="stat-kicker">WhatsApp</div>
-        <div class="stat-val ${wa().enabled ? 'green' : 'muted'}">${wa().enabled ? 'Active' : 'Inactive'}</div>
-        <div class="stat-sub">${esc(wa().dmPolicy ?? '—')}</div>
+        ${(() => { const configured = wa().enabled && (wa().allowFrom?.length > 0); return `<div class="stat-val ${configured ? 'green' : 'muted'}">${configured ? 'Configured' : wa().enabled ? 'Enabled — no number' : 'Not configured'}</div><div class="stat-sub">${configured ? esc(wa().allowFrom?.[0] ?? '') : 'Set up in Channels'}</div>`; })()}
       </div>
       <div class="stat-card" onclick="App.showView('channels')">
         <div class="stat-kicker">Telegram</div>
-        <div class="stat-val ${tg().enabled ? 'green' : 'muted'}">${tg().enabled ? 'Active' : 'Inactive'}</div>
-        <div class="stat-sub">${tg().enabled ? 'Bot connected' : 'Not configured'}</div>
+        ${(() => { const configured = tg().enabled && tg().botToken; return `<div class="stat-val ${configured ? 'green' : 'muted'}">${configured ? 'Configured' : tg().enabled ? 'Enabled — no token' : 'Not configured'}</div><div class="stat-sub">${configured ? 'Bot connected' : 'Set up in Channels'}</div>`; })()}
       </div>
     </div>
 
@@ -235,7 +249,10 @@ const App = (() => {
       <div class="card">
         <div class="irow-3 mb-14">
           <div class="field mb-0"><label class="form-label">Provider</label><select class="form-select" id="m-prov" onchange="App.onProvChange('m-prov','m-model')">${providerOpts(prov)}</select></div>
-          <div class="field mb-0"><label class="form-label">Model</label><select class="form-select" id="m-model">${modelOpts(prov, ag().model)}</select></div>
+          <div class="field mb-0"><label class="form-label">Model</label>
+            <select class="form-select" id="m-model" onchange="App.onModelChange('m-model')">${modelOpts(prov, ag().model)}</select>
+            ${modelCustomInput('m-model', ag().model)}
+          </div>
           <div class="field mb-0"><label class="form-label">API Key (optional)</label><input class="form-input" id="m-apikey" type="password" placeholder="Saved to .env, leave blank to keep"></div>
         </div>
         <div class="divider-h"></div>
@@ -385,9 +402,14 @@ const App = (() => {
 
   function viewAntfarm() {
     const wfs = [
-      { id: 'feature-dev', n: 'Feature Dev', icon: 'I', agents: 7, desc: 'Describe a feature. Receive a tested, reviewed pull request.', pipeline: ['plan', 'setup', 'implement', 'verify', 'test', 'pr', 'review'] },
+      { id: 'feature-dev', n: 'Feature Development', icon: 'I', agents: 7, desc: 'Describe a feature. Receive a tested, reviewed pull request.', pipeline: ['plan', 'setup', 'implement', 'verify', 'test', 'pr', 'review'] },
       { id: 'security-audit', n: 'Security Audit', icon: 'II', agents: 7, desc: 'Point at a repository. Get a security-fix PR with regression tests.', pipeline: ['scan', 'prioritize', 'setup', 'fix', 'verify', 'test', 'pr'] },
-      { id: 'bug-fix', n: 'Bug Fix', icon: 'III', agents: 6, desc: 'Paste a bug report. Get a fix with a regression test.', pipeline: ['triage', 'investigate', 'setup', 'fix', 'verify', 'pr'] },
+      { id: 'bug-fix', n: 'Bug Fix', icon: 'III', agents: 6, desc: 'Paste a bug report. Get a fix with a targeted regression test.', pipeline: ['triage', 'investigate', 'setup', 'fix', 'verify', 'pr'] },
+      { id: 'code-review', n: 'Code Review', icon: 'IV', agents: 5, desc: 'Paste a diff or PR URL. Receive a structured review with suggestions.', pipeline: ['fetch', 'analyze', 'security', 'feedback', 'report'] },
+      { id: 'refactor', n: 'Refactor & Clean-Up', icon: 'V', agents: 6, desc: 'Name a module or smell. Get a refactored PR with tests preserved.', pipeline: ['analyze', 'plan', 'setup', 'refactor', 'test', 'pr'] },
+      { id: 'docs', n: 'Documentation', icon: 'VI', agents: 5, desc: 'Point at a codebase. Get comprehensive docs written and committed.', pipeline: ['scan', 'outline', 'author', 'review', 'pr'] },
+      { id: 'test-gen', n: 'Test Generation', icon: 'VII', agents: 5, desc: 'Specify coverage goals. Receive a full test suite PR.', pipeline: ['analyze', 'plan', 'generate', 'verify', 'pr'] },
+      { id: 'dependency-upgrade', n: 'Dependency Upgrade', icon: 'VIII', agents: 6, desc: 'Specify a dep or "all". Get a safe upgrade PR with compatibility tests.', pipeline: ['audit', 'plan', 'upgrade', 'test', 'fix', 'pr'] },
     ];
     const installBanner = !state.antfarmInstalled ? `
     <div class="banner banner-warn">
@@ -521,14 +543,54 @@ const App = (() => {
     const log = () => state.cfg.logging ?? {};
     const sub = () => state.cfg.agents?.defaults?.subagents ?? {};
 
+    const currentToken = esc(gw().authToken ?? '');
+
     return `
     <div class="page-hd">
-      <div class="page-kicker">Advanced Configuration</div>
-      <div class="page-title">Settings <em>& Automation</em></div>
-      <div class="page-sub">Every OpenClaw option, explained in plain English. All changes save directly to openclaw.json.</div>
+      <div class="page-kicker">Configuration</div>
+      <div class="page-title">Settings <em>&amp; Automation</em></div>
+      <div class="page-sub">All OpenClaw options in one place. Changes save directly to openclaw.json.</div>
       <div class="page-rule"></div>
     </div>
     <div class="settings-grid">
+
+    <!-- ─── CREDENTIALS & ACCESS ──────────────────────────────────────────── -->
+    <div class="sec">
+      <div class="sec-hd"><div class="sec-title">🔑 Credentials &amp; Access</div></div>
+      <div class="creds-card">
+        <div class="settings-section-note">Your gateway token authenticates the Control UI and API calls. Keep it secret. API keys are stored in your .env file.</div>
+
+        <div class="form-label" style="margin-bottom:8px">Gateway Auth Token</div>
+        <div class="token-display">
+          <span id="token-masked">${currentToken ? currentToken.slice(0, 8) + '••••••••••••••••' + currentToken.slice(-4) : 'No token set — all requests are unauthenticated'}</span>
+          ${currentToken ? `<button class="copy-btn" onclick="App.copy(this,'${currentToken}')">Copy</button>` : ''}
+        </div>
+        <div class="irow mb-14">
+          <div class="field mb-0" style="flex:2"><label class="form-label">New Token (leave blank to keep current)</label><input class="form-input" id="gw-token-new" type="password" placeholder="Paste new token or leave blank"></div>
+          <div class="field mb-0"><label class="form-label">Token TTL (hours)</label><input class="form-input" id="gw-token-ttl" type="number" value="${gw().tokenTTLHours ?? 24}" min="1"></div>
+        </div>
+        <button class="btn btn-ink" onclick="App.saveGatewayToken()">Save Token</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:14px">API Keys</div>
+        <div class="settings-section-note">Saved to your .env file. Leave blank to keep the existing key.</div>
+        ${[
+        ['ANTHROPIC_API_KEY', 'Anthropic'],
+        ['OPENAI_API_KEY', 'OpenAI'],
+        ['GEMINI_API_KEY', 'Google Gemini'],
+        ['OPENROUTER_API_KEY', 'OpenRouter'],
+        ['GROQ_API_KEY', 'Groq'],
+        ['TELEGRAM_BOT_TOKEN', 'Telegram Bot'],
+        ['TWILIO_ACCOUNT_SID', 'Twilio SID'],
+        ['TWILIO_AUTH_TOKEN', 'Twilio Auth Token'],
+      ].map(([k, l]) => `
+        <div class="irow mb-14">
+          <div class="field mb-0" style="flex:1"><label class="form-label">${l}</label><input class="form-input" type="password" id="key-${k}" placeholder="••••••••••"></div>
+          <button class="btn btn-ghost btn-sm" style="margin-top:16px;flex-shrink:0" onclick="App.saveKey('${k}','${l}')">Save</button>
+        </div>`).join('')}
+      </div>
+    </div>
 
     <!-- ─── CRON JOBS ──────────────────────────────────────────────────────── -->
     <div class="sec">
@@ -537,43 +599,40 @@ const App = (() => {
         <label class="toggle"><input type="checkbox" id="cron-on" ${cr().enabled ? 'checked' : ''}><span class="toggle-track"></span></label>
       </div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Cron jobs let your agent automatically run tasks on a schedule — like sending a daily briefing, checking your email every hour, or backing up files at midnight. You create jobs by talking to the agent in any channel.</p>
+        <div class="settings-section-note">Run tasks on a schedule — daily briefings, hourly email checks, midnight backups. Create jobs by chatting with the agent.</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Max jobs running at once</label>
+            <label class="form-label">Max concurrent jobs</label>
             <input class="form-input" id="cron-maxconc" type="number" value="${cr().maxConcurrentRuns ?? 2}" min="1" max="10">
-            <div class="form-hint">How many scheduled jobs can overlap. Start with 2.</div>
+            <div class="form-hint">Overlapping job limit. Start with 2.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Keep completed job history for</label>
+            <label class="form-label">History retention</label>
             <select class="form-select" id="cron-retention">
               <option value="1h"  ${cr().sessionRetention === '1h' ? 'selected' : ''}>1 hour</option>
               <option value="6h"  ${cr().sessionRetention === '6h' ? 'selected' : ''}>6 hours</option>
-              <option value="24h" ${!cr().sessionRetention || cr().sessionRetention === '24h' ? 'selected' : ''}>24 hours (default)</option>
+              <option value="24h" ${!cr().sessionRetention || cr().sessionRetention === '24h' ? 'selected' : ''}>24 hours</option>
               <option value="48h" ${cr().sessionRetention === '48h' ? 'selected' : ''}>48 hours</option>
               <option value="7d"  ${cr().sessionRetention === '7d' ? 'selected' : ''}>7 days</option>
             </select>
-            <div class="form-hint">How long to keep logs from finished jobs before auto-cleanup.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Max run-log size per job</label>
+            <label class="form-label">Max log per job</label>
             <select class="form-select" id="cron-logbytes">
-              <option value="500kb"  ${cr().runLog?.maxBytes === '500kb' ? 'selected' : ''}>500 KB</option>
+              <option value="500kb" ${cr().runLog?.maxBytes === '500kb' ? 'selected' : ''}>500 KB</option>
               <option value="1mb"   ${cr().runLog?.maxBytes === '1mb' ? 'selected' : ''}>1 MB</option>
-              <option value="2mb"   ${!cr().runLog?.maxBytes || cr().runLog?.maxBytes === '2mb' ? 'selected' : ''}>2 MB (default)</option>
+              <option value="2mb"   ${!cr().runLog?.maxBytes || cr().runLog?.maxBytes === '2mb' ? 'selected' : ''}>2 MB</option>
               <option value="5mb"   ${cr().runLog?.maxBytes === '5mb' ? 'selected' : ''}>5 MB</option>
             </select>
-            <div class="form-hint">Storage cap for each job's log file.</div>
           </div>
         </div>
         <div class="irow mb-14">
           <div class="field mb-0" style="flex:2">
-            <label class="form-label">Webhook URL (optional) — where job results get sent</label>
-            <input class="form-input" id="cron-webhook" value="${esc(cr().webhook ?? '')}" placeholder="https://your-server.com/cron-results">
-            <div class="form-hint">Leave blank to skip outbound delivery. Useful for Slack/Discord notifications.</div>
+            <label class="form-label">Webhook URL (for job results)</label>
+            <input class="form-input" id="cron-webhook" value="${esc(cr().webhook ?? '')}" placeholder="https://your-server.com/results">
           </div>
           <div class="field mb-0">
-            <label class="form-label">Webhook bearer token</label>
+            <label class="form-label">Webhook token</label>
             <input class="form-input" id="cron-webhooktoken" type="password" value="${esc(cr().webhookToken ?? '')}" placeholder="optional secret">
           </div>
         </div>
@@ -585,48 +644,47 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">💬 Session &amp; Conversation Memory</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Sessions are how the agent remembers context within a conversation. You can isolate each user's memory, share it across devices, or reset it daily.</p>
+        <div class="settings-section-note">Control how the agent stores conversation context across channels and users.</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Who gets their own separate memory?</label>
+            <label class="form-label">Memory scope</label>
             <select class="form-select" id="ses-scope">
-              <option value="main"                ${ses().dmScope === 'main' ? 'selected' : ''}>Everyone shares one conversation</option>
-              <option value="per-peer"             ${ses().dmScope === 'per-peer' ? 'selected' : ''}>Separate per person (across all channels)</option>
-              <option value="per-channel-peer"     ${!ses().dmScope || ses().dmScope === 'per-channel-peer' ? 'selected' : ''}>Separate per person per channel (recommended)</option>
-              <option value="per-account-channel-peer" ${ses().dmScope === 'per-account-channel-peer' ? 'selected' : ''}>Fully isolated (multi-account setups)</option>
+              <option value="main"                    ${ses().dmScope === 'main' ? 'selected' : ''}>Everyone shares one</option>
+              <option value="per-peer"                ${ses().dmScope === 'per-peer' ? 'selected' : ''}>Per person (all channels)</option>
+              <option value="per-channel-peer"        ${!ses().dmScope || ses().dmScope === 'per-channel-peer' ? 'selected' : ''}>Per person per channel ✓</option>
+              <option value="per-account-channel-peer" ${ses().dmScope === 'per-account-channel-peer' ? 'selected' : ''}>Fully isolated</option>
             </select>
-            <div class="form-hint">"Per person per channel" means WhatsApp and Telegram get their own separate memory.</div>
+            <div class="form-hint">Recommended: per person per channel.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Auto-reset conversations</label>
+            <label class="form-label">Auto-reset</label>
             <select class="form-select" id="ses-reset">
-              <option value="never"  ${!ses().reset?.mode ? 'selected' : ''}>Never (manual only)</option>
-              <option value="daily"  ${ses().reset?.mode === 'daily' ? 'selected' : ''}>Every day at a set hour</option>
-              <option value="idle"   ${ses().reset?.mode === 'idle' ? 'selected' : ''}>After inactivity timeout</option>
+              <option value="never" ${!ses().reset?.mode ? 'selected' : ''}>Never (manual only)</option>
+              <option value="daily" ${ses().reset?.mode === 'daily' ? 'selected' : ''}>Daily at set hour</option>
+              <option value="idle"  ${ses().reset?.mode === 'idle' ? 'selected' : ''}>After inactivity</option>
             </select>
-            <div class="form-hint">"Daily" wipes context at midnight. "Idle" wipes after no messages for X minutes.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Reset at hour (0–23, daily mode)</label>
+            <label class="form-label">Reset at hour (0–23)</label>
             <input class="form-input" id="ses-hour" type="number" value="${ses().reset?.atHour ?? 4}" min="0" max="23">
-            <div class="form-hint">e.g. 4 = 4 AM in your timezone.</div>
+            <div class="form-hint">Used in daily mode. e.g. 4 = 4 AM.</div>
           </div>
         </div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Idle timeout before reset (minutes)</label>
+            <label class="form-label">Idle timeout (mins)</label>
             <input class="form-input" id="ses-idle" type="number" value="${ses().reset?.idleMinutes ?? 120}" min="5">
           </div>
           <div class="field mb-0">
-            <label class="form-label">Max history size (sessions.json)</label>
+            <label class="form-label">Max history entries</label>
             <input class="form-input" id="ses-maxentries" type="number" value="${ses().maintenance?.maxEntries ?? 500}" min="50">
-            <div class="form-hint">Oldest sessions pruned when exceeded.</div>
+            <div class="form-hint">Oldest pruned when exceeded.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Keep old reset transcripts for</label>
+            <label class="form-label">Keep old transcripts</label>
             <select class="form-select" id="ses-archive">
               <option value="7d"  ${ses().maintenance?.resetArchiveRetention === '7d' ? 'selected' : ''}>7 days</option>
-              <option value="30d" ${!ses().maintenance?.resetArchiveRetention || ses().maintenance?.resetArchiveRetention === '30d' ? 'selected' : ''}>30 days (default)</option>
+              <option value="30d" ${!ses().maintenance?.resetArchiveRetention || ses().maintenance?.resetArchiveRetention === '30d' ? 'selected' : ''}>30 days</option>
               <option value="90d" ${ses().maintenance?.resetArchiveRetention === '90d' ? 'selected' : ''}>90 days</option>
             </select>
           </div>
@@ -637,91 +695,87 @@ const App = (() => {
 
     <!-- ─── CONTEXT COMPACTION ────────────────────────────────────────────── -->
     <div class="sec">
-      <div class="sec-hd"><div class="sec-title">🗜 Context Compaction (Memory Management)</div></div>
+      <div class="sec-hd"><div class="sec-title">🗜 Context Compaction</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">When a conversation gets very long, the agent needs to summarize the history to stay within the model's token limit. Compaction controls how that summary is created.</p>
+        <div class="settings-section-note">When conversations get long, the agent summarizes history to stay within token limits.</div>
         <div class="irow mb-14">
           <div class="field mb-0">
             <label class="form-label">Compaction mode</label>
             <select class="form-select" id="cmp-mode">
-              <option value="default"   ${!cmp().mode || cmp().mode === 'default' ? 'selected' : ''}>Standard — summarize in one pass (fast)</option>
-              <option value="safeguard" ${cmp().mode === 'safeguard' ? 'selected' : ''}>Safeguard — chunk long histories (safer for big contexts)</option>
+              <option value="default"   ${!cmp().mode || cmp().mode === 'default' ? 'selected' : ''}>Standard (one pass)</option>
+              <option value="safeguard" ${cmp().mode === 'safeguard' ? 'selected' : ''}>Safeguard (chunked)</option>
             </select>
           </div>
           <div class="field mb-0">
             <label class="form-label">Identifier preservation</label>
             <select class="form-select" id="cmp-ids">
-              <option value="strict" ${!cmp().identifierPolicy || cmp().identifierPolicy === 'strict' ? 'selected' : ''}>Strict — preserve IDs, ticket numbers, ports</option>
-              <option value="off"    ${cmp().identifierPolicy === 'off' ? 'selected' : ''}>Off — no special preservation</option>
-              <option value="custom" ${cmp().identifierPolicy === 'custom' ? 'selected' : ''}>Custom — use my own instructions below</option>
+              <option value="strict" ${!cmp().identifierPolicy || cmp().identifierPolicy === 'strict' ? 'selected' : ''}>Strict (keep IDs &amp; ports)</option>
+              <option value="off"    ${cmp().identifierPolicy === 'off' ? 'selected' : ''}>Off</option>
+              <option value="custom" ${cmp().identifierPolicy === 'custom' ? 'selected' : ''}>Custom instructions</option>
             </select>
-            <div class="form-hint">"Strict" prevents the agent from losing important references like deployment IDs or URLs during summarization.</div>
+            <div class="form-hint">Strict = keeps deployment IDs, URLs, ticket numbers.</div>
           </div>
         </div>
         <div class="field mb-14">
-          <label class="form-label">Custom identifier instructions (only if custom mode selected above)</label>
-          <input class="form-input" id="cmp-custom-ids" value="${esc(cmp().identifierInstructions ?? '')}" placeholder="e.g. Preserve deployment IDs, ticket numbers, and host:port pairs exactly.">
+          <label class="form-label">Custom identifier instructions (custom mode only)</label>
+          <input class="form-input" id="cmp-custom-ids" value="${esc(cmp().identifierInstructions ?? '')}" placeholder="Keep deployment IDs, ticket numbers, and host:port exactly.">
         </div>
-        <div class="irow-3 mb-14">
+        <div class="irow mb-14">
           <div class="field mb-0">
-            <label class="form-label">Auto memory flush before compaction</label>
+            <label class="form-label">Flush memory before compaction</label>
             <select class="form-select" id="cmp-flush">
-              <option value="true"  ${cmp().memoryFlush?.enabled !== false ? 'selected' : ''}>Yes — write lasting notes first</option>
-              <option value="false" ${cmp().memoryFlush?.enabled === false ? 'selected' : ''}>No — skip flush step</option>
+              <option value="true"  ${cmp().memoryFlush?.enabled !== false ? 'selected' : ''}>Yes — write notes first</option>
+              <option value="false" ${cmp().memoryFlush?.enabled === false ? 'selected' : ''}>No</option>
             </select>
-            <div class="form-hint">Triggers a silent turn where the agent writes important notes to a file before compacting.</div>
           </div>
           <div class="field mb-0">
             <label class="form-label">Token safety buffer</label>
             <input class="form-input" id="cmp-reserve" type="number" value="${cmp().reserveTokensFloor ?? 24000}">
-            <div class="form-hint">Minimum tokens held back before compaction triggers.</div>
+            <div class="form-hint">Tokens held back before compaction triggers.</div>
           </div>
         </div>
-        <button class="btn btn-ink" onclick="App.saveCompaction()">Save Compaction Settings</button>
+        <button class="btn btn-ink" onclick="App.saveCompaction()">Save Compaction</button>
       </div>
     </div>
 
     <!-- ─── CONTEXT PRUNING ───────────────────────────────────────────────── -->
     <div class="sec">
-      <div class="sec-hd"><div class="sec-title">✂️ Context Pruning (Smart History Trimming)</div></div>
+      <div class="sec-hd"><div class="sec-title">✂️ Context Pruning</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Pruning silently removes bloated tool outputs from the agent's working memory without deleting history from disk. The agent stays fast without losing the actual conversation.</p>
+        <div class="settings-section-note">Silently removes bloated tool outputs from working memory without deleting history. Keeps the agent fast.</div>
         <div class="irow mb-14">
           <div class="field mb-0">
             <label class="form-label">Pruning mode</label>
             <select class="form-select" id="prn-mode">
-              <option value="off"      ${!prn().mode || prn().mode === 'off' ? 'selected' : ''}>Off — keep everything (uses more tokens)</option>
-              <option value="cache-ttl" ${prn().mode === 'cache-ttl' ? 'selected' : ''}>Cache TTL — prune old tool outputs periodically</option>
+              <option value="off"       ${!prn().mode || prn().mode === 'off' ? 'selected' : ''}>Off (keep everything)</option>
+              <option value="cache-ttl" ${prn().mode === 'cache-ttl' ? 'selected' : ''}>Cache TTL (periodic)</option>
             </select>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Prune run interval</label>
+            <label class="form-label">Prune interval</label>
             <select class="form-select" id="prn-ttl">
-              <option value="30m" ${prn().ttl === '30m' ? 'selected' : ''}>Every 30 minutes</option>
-              <option value="1h"  ${!prn().ttl || prn().ttl === '1h' ? 'selected' : ''}>Every hour (default)</option>
+              <option value="30m" ${prn().ttl === '30m' ? 'selected' : ''}>Every 30 min</option>
+              <option value="1h"  ${!prn().ttl || prn().ttl === '1h' ? 'selected' : ''}>Every 1 hour</option>
               <option value="2h"  ${prn().ttl === '2h' ? 'selected' : ''}>Every 2 hours</option>
               <option value="4h"  ${prn().ttl === '4h' ? 'selected' : ''}>Every 4 hours</option>
             </select>
-            <div class="form-hint">How often to check for and prune oversized tool outputs.</div>
           </div>
         </div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Keep last N assistant messages</label>
+            <label class="form-label">Keep last N assistant replies</label>
             <input class="form-input" id="prn-keep" type="number" value="${prn().keepLastAssistants ?? 3}" min="1">
-            <div class="form-hint">Recent replies are always protected from pruning.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Min tool output size to prune (chars)</label>
+            <label class="form-label">Min tool output size (chars)</label>
             <input class="form-input" id="prn-minchars" type="number" value="${prn().minPrunableToolChars ?? 50000}">
           </div>
           <div class="field mb-0">
-            <label class="form-label">Hard-clear placeholder text</label>
+            <label class="form-label">Pruned output placeholder</label>
             <input class="form-input" id="prn-placeholder" value="${esc(prn().hardClear?.placeholder ?? '[Old tool result cleared]')}">
-            <div class="form-hint">What replaces a pruned output. The agent sees this text.</div>
           </div>
         </div>
-        <button class="btn btn-ink" onclick="App.saveContextPruning()">Save Pruning Settings</button>
+        <button class="btn btn-ink" onclick="App.saveContextPruning()">Save Pruning</button>
       </div>
     </div>
 
@@ -729,33 +783,33 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">🔧 Tool Permissions</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:14px">Choose which capabilities your agent is allowed to use. Unchecking a tool completely blocks it, even if the agent tries to call it.</p>
+        <div class="settings-section-note">Uncheck tools to block them entirely — even if the agent tries to call them. Changes take effect next session.</div>
         <div class="irow mb-14" style="align-items:flex-start">
           <div style="flex:1">
-            <div class="form-label" style="margin-bottom:10px">File &amp; Code Tools</div>
+            <div class="form-label" style="margin-bottom:10px">File &amp; Code</div>
             <div class="check-grid">
-              ${[['read', 'Read files from disk'], ['write', 'Write + create files'], ['edit', 'Edit existing files'], ['apply_patch', 'Apply code patches'], ['exec', 'Run shell commands'], ['process', 'Manage background processes']]
-        .map(([t, d]) => `<label class="checkbox" title="${esc(d)}"><input type="checkbox" class="tool-perm" value="${t}" ${(tls().deny ?? []).includes(t) ? '' : 'checked'}><span class="checkbox-label">${t} — <em style="color:var(--txt4);font-style:italic;font-size:11px">${esc(d)}</em></span></label>`).join('')}
+              ${[['read', 'Read files'], ['write', 'Create/write files'], ['edit', 'Edit files'], ['apply_patch', 'Apply patches'], ['exec', 'Run shell commands'], ['process', 'Background processes']]
+        .map(([t, d]) => `<label class="checkbox" title="${esc(d)}"><input type="checkbox" class="tool-perm" value="${t}" ${(tls().deny ?? []).includes(t) ? '' : 'checked'}><span class="checkbox-label">${t}</span></label>`).join('')}
             </div>
           </div>
           <div style="flex:1">
-            <div class="form-label" style="margin-bottom:10px">Web &amp; Agent Tools</div>
+            <div class="form-label" style="margin-bottom:10px">Web &amp; AI</div>
             <div class="check-grid">
-              ${[['web_search', 'Search the internet'], ['web_fetch', 'Fetch a URL'], ['browser', 'Control a web browser'], ['canvas', 'Create visual outputs'], ['image', 'Generate images'], ['memory_search', 'Search long-term memory'], ['memory_get', 'Read memory files']]
-        .map(([t, d]) => `<label class="checkbox" title="${esc(d)}"><input type="checkbox" class="tool-perm" value="${t}" ${(tls().deny ?? []).includes(t) ? '' : 'checked'}><span class="checkbox-label">${t} — <em style="color:var(--txt4);font-style:italic;font-size:11px">${esc(d)}</em></span></label>`).join('')}
+              ${[['web_search', 'Search the web'], ['web_fetch', 'Fetch a URL'], ['browser', 'Browser control'], ['canvas', 'Visual output'], ['image', 'Generate images'], ['memory_search', 'Search memory'], ['memory_get', 'Read memory']]
+        .map(([t, d]) => `<label class="checkbox" title="${esc(d)}"><input type="checkbox" class="tool-perm" value="${t}" ${(tls().deny ?? []).includes(t) ? '' : 'checked'}><span class="checkbox-label">${t}</span></label>`).join('')}
             </div>
           </div>
           <div style="flex:1">
-            <div class="form-label" style="margin-bottom:10px">Sessions &amp; Messaging</div>
+            <div class="form-label" style="margin-bottom:10px">Sessions &amp; System</div>
             <div class="check-grid">
-              ${[['sessions_list', 'List active sessions'], ['sessions_send', 'Send messages to sessions'], ['sessions_spawn', 'Spawn sub-agents'], ['sessions_history', 'Read session history'], ['cron', 'Create scheduled jobs'], ['gateway', 'Manage the gateway itself'], ['nodes', 'Manage connected nodes']]
-        .map(([t, d]) => `<label class="checkbox" title="${esc(d)}"><input type="checkbox" class="tool-perm" value="${t}" ${(tls().deny ?? []).includes(t) ? '' : 'checked'}><span class="checkbox-label">${t} — <em style="color:var(--txt4);font-style:italic;font-size:11px">${esc(d)}</em></span></label>`).join('')}
+              ${[['sessions_list', 'List sessions'], ['sessions_send', 'Send to sessions'], ['sessions_spawn', 'Spawn sub-agents'], ['sessions_history', 'Read history'], ['cron', 'Cron jobs'], ['gateway', 'Manage gateway'], ['nodes', 'Manage nodes']]
+        .map(([t, d]) => `<label class="checkbox" title="${esc(d)}"><input type="checkbox" class="tool-perm" value="${t}" ${(tls().deny ?? []).includes(t) ? '' : 'checked'}><span class="checkbox-label">${t}</span></label>`).join('')}
             </div>
           </div>
         </div>
-        <div class="form-hint mb-14">💡 For code agents: enable File, Code, and Web tools. For messaging bots: disable exec and browser. For public agents: disable exec, write, browser, and canvas.</div>
+        <div class="form-hint mb-14">💡 Code agents: enable File + Web. Bots: disable exec + browser. Public agents: disable exec, write, browser, canvas.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-ink" onclick="App.saveTools()">Save Tool Permissions</button>
+          <button class="btn btn-ink" onclick="App.saveTools()">Save Permissions</button>
           <button class="btn btn-ghost" onclick="App.setAllTools(true)">Enable All</button>
           <button class="btn btn-ghost" onclick="App.setAllTools(false)">Disable All</button>
         </div>
@@ -766,23 +820,23 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">🔄 Loop Detection &amp; Safety</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Prevents the agent from getting stuck in repetitive tool call loops. Highly recommended for autonomous/unattended runs.</p>
+        <div class="settings-section-note">Stops the agent from getting stuck in repetitive tool loops. Recommended for unattended autonomous runs.</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Enable loop detection</label>
+            <label class="form-label">Loop detection</label>
             <select class="form-select" id="loop-enabled">
-              <option value="false" ${!tls().loopDetection?.enabled ? 'selected' : ''}>Off (default)</option>
+              <option value="false" ${!tls().loopDetection?.enabled ? 'selected' : ''}>Off</option>
               <option value="true"  ${tls().loopDetection?.enabled ? 'selected' : ''}>On</option>
             </select>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Warning threshold (repeated calls)</label>
+            <label class="form-label">Warning threshold</label>
             <input class="form-input" id="loop-warn" type="number" value="${tls().loopDetection?.warningThreshold ?? 10}" min="3">
           </div>
           <div class="field mb-0">
             <label class="form-label">Hard stop threshold</label>
             <input class="form-input" id="loop-stop" type="number" value="${tls().loopDetection?.globalCircuitBreakerThreshold ?? 30}" min="5">
-            <div class="form-hint">Agent is forcibly stopped after this many repeated no-progress calls.</div>
+            <div class="form-hint">Agent forcibly stopped after this many no-progress calls.</div>
           </div>
         </div>
         <button class="btn btn-ink" onclick="App.saveLoopDetection()">Save Loop Detection</button>
@@ -793,27 +847,25 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">🤖 Sub-Agents &amp; Parallel Tasks</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Sub-agents are mini-agents spawned by the main agent to work in parallel. Useful for multi-step research, code review, or running tasks concurrently.</p>
+        <div class="settings-section-note">Mini-agents spawned by the main agent to work in parallel — useful for research, code review, or concurrent tasks.</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Max sub-agents at once</label>
+            <label class="form-label">Max concurrent sub-agents</label>
             <input class="form-input" id="sub-max" type="number" value="${sub().maxConcurrent ?? 1}" min="1" max="10">
-            <div class="form-hint">How many sub-agents can run simultaneously.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Sub-agent model (leave blank = same as main)</label>
-            <input class="form-input" id="sub-model" value="${esc(sub().model ?? '')}" placeholder="e.g. anthropic/claude-haiku-4-5">
-            <div class="form-hint">Use a cheaper/faster model for sub-tasks.</div>
+            <label class="form-label">Sub-agent model (blank = main)</label>
+            <input class="form-input" id="sub-model" value="${esc(sub().model ?? '')}" placeholder="anthropic/claude-haiku-4-5">
+            <div class="form-hint">Use a cheaper model for sub-tasks.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Sub-agent timeout (minutes)</label>
+            <label class="form-label">Timeout (minutes)</label>
             <input class="form-input" id="sub-timeout" type="number" value="${Math.round((sub().runTimeoutSeconds ?? 900) / 60)}" min="1">
           </div>
         </div>
         <div class="field mb-14">
-          <label class="form-label">Archive finished sub-agent sessions after (minutes)</label>
+          <label class="form-label">Archive finished sub-agents after (mins)</label>
           <input class="form-input" id="sub-archive" type="number" value="${sub().archiveAfterMinutes ?? 60}" min="5">
-          <div class="form-hint">Old sub-agent sessions are cleaned up after this time.</div>
         </div>
         <button class="btn btn-ink" onclick="App.saveSubagents()">Save Sub-Agent Settings</button>
       </div>
@@ -823,24 +875,24 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">📨 Message &amp; Reply Behavior</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Fine-tune how the agent handles incoming messages, sends replies, and handles rapid bursts of texts.</p>
+        <div class="settings-section-note">Fine-tune how the agent handles incoming messages, sends reactions, and manages rapid bursts.</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
             <label class="form-label">Response prefix</label>
             <input class="form-input" id="msg-prefix" value="${esc(msg().responsePrefix ?? '')}" placeholder="e.g. 🦞 or leave blank">
-            <div class="form-hint">Text/emoji prepended to every reply. Leave blank for none.</div>
+            <div class="form-hint">Prepended to every reply.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Acknowledgment reaction</label>
+            <label class="form-label">Thinking reaction</label>
             <input class="form-input" id="msg-ack" value="${esc(msg().ackReaction ?? '👀')}" placeholder="👀">
-            <div class="form-hint">Emoji reaction shown while the agent is thinking.</div>
+            <div class="form-hint">Emoji shown while agent thinks.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Show ack on</label>
+            <label class="form-label">Show reaction on</label>
             <select class="form-select" id="msg-ackscope">
-              <option value="group-mentions" ${!msg().ackReactionScope || msg().ackReactionScope === 'group-mentions' ? 'selected' : ''}>Group @-mentions only</option>
+              <option value="group-mentions" ${!msg().ackReactionScope || msg().ackReactionScope === 'group-mentions' ? 'selected' : ''}>Group mentions</option>
               <option value="group-all"      ${msg().ackReactionScope === 'group-all' ? 'selected' : ''}>All group messages</option>
-              <option value="direct"         ${msg().ackReactionScope === 'direct' ? 'selected' : ''}>Direct messages only</option>
+              <option value="direct"         ${msg().ackReactionScope === 'direct' ? 'selected' : ''}>DMs only</option>
               <option value="all"            ${msg().ackReactionScope === 'all' ? 'selected' : ''}>Always</option>
             </select>
           </div>
@@ -849,17 +901,16 @@ const App = (() => {
           <div class="field mb-0">
             <label class="form-label">Inbound debounce (ms)</label>
             <input class="form-input" id="msg-debounce" type="number" value="${msg().inbound?.debounceMs ?? 2000}" min="0">
-            <div class="form-hint">If someone sends multiple texts quickly, wait this long before processing. 0 = no wait.</div>
+            <div class="form-hint">Wait before processing rapid texts. 0 = instant.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Queue mode (rapid messages)</label>
+            <label class="form-label">Queue mode</label>
             <select class="form-select" id="msg-queue">
-              <option value="collect"       ${!msg().queue?.mode || msg().queue?.mode === 'collect' ? 'selected' : ''}>Collect — wait for burst, process together</option>
-              <option value="steer"         ${msg().queue?.mode === 'steer' ? 'selected' : ''}>Steer — interrupt with latest message</option>
-              <option value="followup"      ${msg().queue?.mode === 'followup' ? 'selected' : ''}>Follow-up — queue after current reply</option>
-              <option value="interrupt"     ${msg().queue?.mode === 'interrupt' ? 'selected' : ''}>Interrupt — stop current, start new</option>
+              <option value="collect"   ${!msg().queue?.mode || msg().queue?.mode === 'collect' ? 'selected' : ''}>Collect (wait for burst)</option>
+              <option value="steer"     ${msg().queue?.mode === 'steer' ? 'selected' : ''}>Steer (latest wins)</option>
+              <option value="followup"  ${msg().queue?.mode === 'followup' ? 'selected' : ''}>Follow-up (queue after)</option>
+              <option value="interrupt" ${msg().queue?.mode === 'interrupt' ? 'selected' : ''}>Interrupt (stop &amp; restart)</option>
             </select>
-            <div class="form-hint">"Collect" is safest for most setups.</div>
           </div>
           <div class="field mb-0">
             <label class="form-label">Remove reaction after reply</label>
@@ -876,41 +927,40 @@ const App = (() => {
     <!-- ─── HOOKS (INBOUND WEBHOOKS) ──────────────────────────────────────── -->
     <div class="sec">
       <div class="sec-hd">
-        <div class="sec-title">🪝 Inbound Webhooks (Hooks)</div>
+        <div class="sec-title">🪝 Inbound Webhooks</div>
         <label class="toggle"><input type="checkbox" id="hooks-on" ${hks().enabled ? 'checked' : ''}><span class="toggle-track"></span></label>
       </div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Hooks let external services (Gmail, GitHub, Stripe, etc.) trigger your agent automatically. When a webhook arrives, the agent wakes up and handles it.</p>
+        <div class="settings-section-note">Let external services (Gmail, GitHub, Stripe) trigger the agent automatically. The agent wakes when a webhook arrives.</div>
         <div class="irow mb-14">
           <div class="field mb-0" style="flex:2">
             <label class="form-label">Webhook path</label>
             <input class="form-input" id="hooks-path" value="${esc(hks().path ?? '/hooks')}" placeholder="/hooks">
-            <div class="form-hint">URL path on your gateway that receives webhooks, e.g. POST http://yourip:18789/hooks/gmail</div>
+            <div class="form-hint">POST to: http://yourip:18789/hooks/gmail</div>
           </div>
-          <div class="field mb-0" style="flex:1">
-            <label class="form-label">Auth token (keep secret)</label>
+          <div class="field mb-0">
+            <label class="form-label">Auth token</label>
             <input class="form-input" id="hooks-token" type="password" value="${esc(hks().token ?? '')}" placeholder="••••••••">
-            <div class="form-hint">Callers must send: Authorization: Bearer &lt;token&gt;</div>
+            <div class="form-hint">Callers send: Authorization: Bearer &lt;token&gt;</div>
           </div>
         </div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Default conversation key</label>
+            <label class="form-label">Default session key</label>
             <input class="form-input" id="hooks-sesskey" value="${esc(hks().defaultSessionKey ?? 'hook:ingress')}">
-            <div class="form-hint">Which session hooks belong to by default.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Allow caller to pick session</label>
+            <label class="form-label">Let callers pick session</label>
             <select class="form-select" id="hooks-allowsess">
               <option value="false" ${!hks().allowRequestSessionKey ? 'selected' : ''}>No (safe default)</option>
               <option value="true"  ${hks().allowRequestSessionKey ? 'selected' : ''}>Yes (advanced)</option>
             </select>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Max webhook body size</label>
+            <label class="form-label">Max body size</label>
             <select class="form-select" id="hooks-maxbody">
-              <option value="65536"  ${hks().maxBodyBytes === 65536 ? 'selected' : ''}>64 KB</option>
-              <option value="262144" ${!hks().maxBodyBytes || hks().maxBodyBytes === 262144 ? 'selected' : ''}>256 KB (default)</option>
+              <option value="65536"   ${hks().maxBodyBytes === 65536 ? 'selected' : ''}>64 KB</option>
+              <option value="262144"  ${!hks().maxBodyBytes || hks().maxBodyBytes === 262144 ? 'selected' : ''}>256 KB</option>
               <option value="1048576" ${hks().maxBodyBytes === 1048576 ? 'selected' : ''}>1 MB</option>
             </select>
           </div>
@@ -923,22 +973,22 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">🔊 Text-to-Speech &amp; Voice</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Have the agent reply with synthesized voice audio. Works in channels that support audio messages (like WhatsApp and Telegram).</p>
+        <div class="settings-section-note">Reply with synthesized voice audio on channels that support it (WhatsApp, Telegram).</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
             <label class="form-label">TTS provider</label>
             <select class="form-select" id="tts-prov">
-              <option value=""           ${!tts().provider ? 'selected' : ''}>Off (text only)</option>
-              <option value="openai"      ${tts().provider === 'openai' ? 'selected' : ''}>OpenAI TTS</option>
-              <option value="elevenlabs"  ${tts().provider === 'elevenlabs' ? 'selected' : ''}>ElevenLabs</option>
+              <option value=""          ${!tts().provider ? 'selected' : ''}>Off (text only)</option>
+              <option value="openai"    ${tts().provider === 'openai' ? 'selected' : ''}>OpenAI TTS</option>
+              <option value="elevenlabs" ${tts().provider === 'elevenlabs' ? 'selected' : ''}>ElevenLabs</option>
             </select>
           </div>
           <div class="field mb-0">
             <label class="form-label">Auto-send voice</label>
             <select class="form-select" id="tts-auto">
-              <option value="off"    ${!tts().auto || tts().auto === 'off' ? 'selected' : ''}>Off — text only</option>
-              <option value="always" ${tts().auto === 'always' ? 'selected' : ''}>Always — voice on all replies</option>
-              <option value="inbound" ${tts().auto === 'inbound' ? 'selected' : ''}>Only when user sends voice</option>
+              <option value="off"     ${!tts().auto || tts().auto === 'off' ? 'selected' : ''}>Off</option>
+              <option value="always"  ${tts().auto === 'always' ? 'selected' : ''}>Always</option>
+              <option value="inbound" ${tts().auto === 'inbound' ? 'selected' : ''}>When user sends voice</option>
             </select>
           </div>
           <div class="field mb-0">
@@ -964,38 +1014,38 @@ const App = (() => {
 
     <!-- ─── SANDBOX ──────────────────────────────────────────────────────── -->
     <div class="sec">
-      <div class="sec-hd"><div class="sec-title">🐳 Docker Sandbox (Isolation)</div></div>
+      <div class="sec-hd"><div class="sec-title">🐳 Docker Sandbox</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Run agent code inside an isolated Docker container so it can't break your system. Recommended for public-facing agents or anything that runs untrusted code.</p>
+        <div class="settings-section-note">Run agent code inside an isolated Docker container. Recommended for public-facing agents or untrusted code.</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
             <label class="form-label">Sandbox mode</label>
             <select class="form-select" id="sbx-mode">
-              <option value="off"      ${!sbx().mode || sbx().mode === 'off' ? 'selected' : ''}>Off — no isolation (fastest)</option>
-              <option value="non-main" ${sbx().mode === 'non-main' ? 'selected' : ''}>Sub-agents only — main agent is free</option>
-              <option value="all"      ${sbx().mode === 'all' ? 'selected' : ''}>All sessions — full isolation</option>
+              <option value="off"      ${!sbx().mode || sbx().mode === 'off' ? 'selected' : ''}>Off (fastest)</option>
+              <option value="non-main" ${sbx().mode === 'non-main' ? 'selected' : ''}>Sub-agents only</option>
+              <option value="all"      ${sbx().mode === 'all' ? 'selected' : ''}>All sessions</option>
             </select>
           </div>
           <div class="field mb-0">
             <label class="form-label">Container scope</label>
             <select class="form-select" id="sbx-scope">
-              <option value="agent"   ${!sbx().scope || sbx().scope === 'agent' ? 'selected' : ''}>Per-agent — one container per agent</option>
-              <option value="session" ${sbx().scope === 'session' ? 'selected' : ''}>Per-session — fresh container each time</option>
-              <option value="shared"  ${sbx().scope === 'shared' ? 'selected' : ''}>Shared — one container for all</option>
+              <option value="agent"   ${!sbx().scope || sbx().scope === 'agent' ? 'selected' : ''}>Per-agent</option>
+              <option value="session" ${sbx().scope === 'session' ? 'selected' : ''}>Per-session (fresh each time)</option>
+              <option value="shared"  ${sbx().scope === 'shared' ? 'selected' : ''}>Shared</option>
             </select>
           </div>
           <div class="field mb-0">
             <label class="form-label">Workspace access</label>
             <select class="form-select" id="sbx-wsaccess">
-              <option value="none" ${!sbx().workspaceAccess || sbx().workspaceAccess === 'none' ? 'selected' : ''}>None — isolated workspace</option>
-              <option value="ro"   ${sbx().workspaceAccess === 'ro' ? 'selected' : ''}>Read-only — can read your files</option>
-              <option value="rw"   ${sbx().workspaceAccess === 'rw' ? 'selected' : ''}>Read-write — full file access</option>
+              <option value="none" ${!sbx().workspaceAccess || sbx().workspaceAccess === 'none' ? 'selected' : ''}>None (isolated)</option>
+              <option value="ro"   ${sbx().workspaceAccess === 'ro' ? 'selected' : ''}>Read-only</option>
+              <option value="rw"   ${sbx().workspaceAccess === 'rw' ? 'selected' : ''}>Read-write</option>
             </select>
           </div>
         </div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Container memory limit</label>
+            <label class="form-label">Memory limit</label>
             <select class="form-select" id="sbx-mem">
               <option value="512m" ${sbx().docker?.memory === '512m' ? 'selected' : ''}>512 MB</option>
               <option value="1g"   ${!sbx().docker?.memory || sbx().docker?.memory === '1g' ? 'selected' : ''}>1 GB</option>
@@ -1010,10 +1060,9 @@ const App = (() => {
           <div class="field mb-0">
             <label class="form-label">Network access</label>
             <select class="form-select" id="sbx-net">
-              <option value="none"   ${!sbx().docker?.network || sbx().docker?.network === 'none' ? 'selected' : ''}>None — completely offline</option>
-              <option value="bridge" ${sbx().docker?.network === 'bridge' ? 'selected' : ''}>Bridge — outbound internet allowed</option>
+              <option value="none"   ${!sbx().docker?.network || sbx().docker?.network === 'none' ? 'selected' : ''}>None (safest)</option>
+              <option value="bridge" ${sbx().docker?.network === 'bridge' ? 'selected' : ''}>Bridge (outbound)</option>
             </select>
-            <div class="form-hint">"None" is safest. Use Bridge if the container needs to install packages.</div>
           </div>
         </div>
         <button class="btn btn-ink" onclick="App.saveSandbox()">Save Sandbox Settings</button>
@@ -1024,6 +1073,7 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">📋 Logging</div></div>
       <div class="card">
+        <div class="settings-section-note">Control what gets written to the log and how verbose it is.</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
             <label class="form-label">Log level</label>
@@ -1037,68 +1087,68 @@ const App = (() => {
           <div class="field mb-0">
             <label class="form-label">Console style</label>
             <select class="form-select" id="log-style">
-              <option value="pretty"  ${!log().consoleStyle || log().consoleStyle === 'pretty' ? 'selected' : ''}>Pretty (human readable)</option>
+              <option value="pretty"  ${!log().consoleStyle || log().consoleStyle === 'pretty' ? 'selected' : ''}>Pretty (readable)</option>
               <option value="compact" ${log().consoleStyle === 'compact' ? 'selected' : ''}>Compact</option>
-              <option value="json"    ${log().consoleStyle === 'json' ? 'selected' : ''}>JSON (for log aggregators)</option>
+              <option value="json"    ${log().consoleStyle === 'json' ? 'selected' : ''}>JSON (aggregators)</option>
             </select>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Redact sensitive tool output</label>
+            <label class="form-label">Redact sensitive output</label>
             <select class="form-select" id="log-redact">
               <option value="off"   ${log().redactSensitive === 'off' ? 'selected' : ''}>Off — log everything</option>
-              <option value="tools" ${!log().redactSensitive || log().redactSensitive === 'tools' ? 'selected' : ''}>Tools — hide sensitive tool output</option>
+              <option value="tools" ${!log().redactSensitive || log().redactSensitive === 'tools' ? 'selected' : ''}>Tools (hide sensitive)</option>
             </select>
           </div>
         </div>
         <div class="field mb-14">
-          <label class="form-label">Log file path (leave blank for default /tmp/openclaw/openclaw.log)</label>
+          <label class="form-label">Log file path (blank = /tmp/openclaw/openclaw.log)</label>
           <input class="form-input" id="log-file" value="${esc(log().file ?? '')}" placeholder="/tmp/openclaw/openclaw.log">
         </div>
-        <button class="btn btn-ink" onclick="App.saveLogging()">Save Logging Settings</button>
+        <button class="btn btn-ink" onclick="App.saveLogging()">Save Logging</button>
       </div>
     </div>
 
     <!-- ─── AGENT WORKSPACE DEFAULTS ─────────────────────────────────────── -->
     <div class="sec">
-      <div class="sec-hd"><div class="sec-title">📁 Workspace &amp; Bootstrap Defaults</div></div>
+      <div class="sec-hd"><div class="sec-title">📁 Workspace Defaults</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Controls how the agent loads and reads workspace files at startup. These files (SOUL.md, USER.md, AGENTS.md etc.) give the agent its initial context.</p>
+        <div class="settings-section-note">Controls how the agent loads workspace files (SOUL.md, USER.md, AGENT.md) at startup.</div>
         <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Max chars per workspace file</label>
+            <label class="form-label">Max chars per file</label>
             <input class="form-input" id="ws-maxchars" type="number" value="${state.cfg.agents?.defaults?.bootstrapMaxChars ?? 20000}">
-            <div class="form-hint">Longer files are truncated to this length.</div>
+            <div class="form-hint">Longer files are truncated.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Max total workspace chars</label>
+            <label class="form-label">Max total chars</label>
             <input class="form-input" id="ws-totalmaxchars" type="number" value="${state.cfg.agents?.defaults?.bootstrapTotalMaxChars ?? 150000}">
-            <div class="form-hint">Combined limit across all workspace files.</div>
+            <div class="form-hint">Combined limit across all files.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Your timezone (for agent context)</label>
+            <label class="form-label">Your timezone</label>
             <input class="form-input" id="ws-tz" value="${esc(state.cfg.agents?.defaults?.userTimezone ?? '')}" placeholder="America/Chicago">
-            <div class="form-hint">Leave blank to use server timezone.</div>
+            <div class="form-hint">Blank = server timezone.</div>
           </div>
         </div>
-        <div class="irow mb-14">
+        <div class="irow-3 mb-14">
           <div class="field mb-0">
-            <label class="form-label">Time format in agent context</label>
+            <label class="form-label">Time format</label>
             <select class="form-select" id="ws-timefmt">
-              <option value="auto" ${!state.cfg.agents?.defaults?.timeFormat || state.cfg.agents?.defaults?.timeFormat === 'auto' ? 'selected' : ''}>Auto (OS preference)</option>
+              <option value="auto" ${!state.cfg.agents?.defaults?.timeFormat || state.cfg.agents?.defaults?.timeFormat === 'auto' ? 'selected' : ''}>Auto</option>
               <option value="12"   ${state.cfg.agents?.defaults?.timeFormat === '12' ? 'selected' : ''}>12-hour (AM/PM)</option>
               <option value="24"   ${state.cfg.agents?.defaults?.timeFormat === '24' ? 'selected' : ''}>24-hour</option>
             </select>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Max image resolution (px, longest side)</label>
+            <label class="form-label">Max image resolution (px)</label>
             <input class="form-input" id="ws-imgpx" type="number" value="${state.cfg.agents?.defaults?.imageMaxDimensionPx ?? 1200}" min="400" max="4000">
-            <div class="form-hint">Lower = fewer vision tokens. Higher = more detail.</div>
+            <div class="form-hint">Longest side. Lower = fewer tokens.</div>
           </div>
           <div class="field mb-0">
-            <label class="form-label">Skip auto-creating workspace files</label>
+            <label class="form-label">Auto-create workspace files</label>
             <select class="form-select" id="ws-skip">
-              <option value="false" ${!state.cfg.agents?.defaults?.skipBootstrap ? 'selected' : ''}>No — create SOUL.md, USER.md etc. on first run</option>
-              <option value="true"  ${state.cfg.agents?.defaults?.skipBootstrap ? 'selected' : ''}>Yes — I'll manage workspace files myself</option>
+              <option value="false" ${!state.cfg.agents?.defaults?.skipBootstrap ? 'selected' : ''}>Yes (create on first run)</option>
+              <option value="true"  ${state.cfg.agents?.defaults?.skipBootstrap ? 'selected' : ''}>No (manage manually)</option>
             </select>
           </div>
         </div>
@@ -1110,25 +1160,23 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">🔌 External Services &amp; APIs</div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">Connect any external API or service your agent should be able to call. Examples: a Notion database, your CRM, a weather API, a Slack webhook, or a custom backend. The agent can use these as named tools.
-        </p>
+        <div class="settings-section-note">Add named services (Notion, CRM, weather API, etc.) the agent can call as tools. After saving, tell the agent: "Use [Name] API to…"</div>
         <div id="ext-svc-list">
           ${(state.cfg.externalServices ?? []).map((s, i) => `
           <div class="ext-svc-row" id="ext-row-${i}" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px">
-            <div class="field mb-0" style="flex:1;min-width:140px"><label class="form-label">Service name</label><input class="form-input" id="ext-name-${i}" value="${esc(s.name ?? '')}" placeholder="My CRM"></div>
+            <div class="field mb-0" style="flex:1;min-width:140px"><label class="form-label">Name</label><input class="form-input" id="ext-name-${i}" value="${esc(s.name ?? '')}" placeholder="My CRM"></div>
             <div class="field mb-0" style="flex:2;min-width:200px"><label class="form-label">Base URL</label><input class="form-input" id="ext-url-${i}" value="${esc(s.baseUrl ?? '')}" placeholder="https://api.example.com"></div>
-            <div class="field mb-0" style="flex:1.5;min-width:160px"><label class="form-label">API Key / Bearer token</label><input class="form-input" id="ext-key-${i}" type="password" value="${esc(s.apiKey ?? '')}" placeholder="••••••••"></div>
+            <div class="field mb-0" style="flex:1.5;min-width:160px"><label class="form-label">API Key / Token</label><input class="form-input" id="ext-key-${i}" type="password" value="${esc(s.apiKey ?? '')}" placeholder="••••••••"></div>
             <button class="btn btn-danger btn-sm" style="margin-bottom:2px" onclick="App.removeExtSvc(${i})">✕</button>
           </div>
           <div style="margin:-4px 0 14px;">
             <input class="form-input" id="ext-header-${i}" value="${esc(s.customHeader ?? '')}" placeholder="Optional: custom header e.g. X-Api-Version: 2024-01" style="font-size:11.5px">
-          </div>`).join('') || '<div class="empty-state" style="margin:0 0 14px">No external services yet. Click Add below.</div>'}
+          </div>`).join('') || '<div class="empty-state" style="margin:0 0 14px">No external services yet.</div>'}
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost" onclick="App.addExtSvc()">+ Add Service</button>
           <button class="btn btn-ink" onclick="App.saveExternalServices()">Save All Services</button>
         </div>
-        <div class="form-hint" style="margin-top:10px">💡 After saving, tell your agent: <em>"Use the [Service Name] API to..."</em> and it will know how to authenticate.</div>
       </div>
     </div>
 
@@ -1136,16 +1184,12 @@ const App = (() => {
     <div class="sec">
       <div class="sec-hd"><div class="sec-title">⚡ MCP Integrations <span class="tag tag-gold" style="margin-left:6px">Model Context Protocol</span></div></div>
       <div class="card">
-        <p class="form-hint" style="margin-bottom:16px">MCP servers extend what your agent can do — like giving it access to a filesystem, a database, GitHub, Figma, Stripe, or any tool with an MCP interface. Each server runs as a background process the agent can call.
-        </p>
-        <div class="form-hint" style="margin-bottom:14px;padding:10px 14px;background:var(--gold-lt);border:1px solid var(--border);border-radius:var(--r-sm)">
-          <strong>What is MCP?</strong> Model Context Protocol is an open standard from Anthropic that lets AI agents use external tools safely. Instead of writing custom code, you just point the agent at an MCP server and it figures out how to use it automatically.
-        </div>
+        <div class="settings-section-note">MCP servers extend your agent with external tools — filesystem, databases, GitHub, Figma, Stripe, etc. Each runs as a background process the agent can call automatically.</div>
         <div id="mcp-list">
           ${(state.cfg.mcpServers ?? []).map((m, i) => `
           <div style="border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:12px;background:var(--bg3)">
             <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:10px">
-              <div class="field mb-0" style="flex:1;min-width:200px"><label class="form-label">Server name</label><input class="form-input" id="mcp-name-${i}" value="${esc(m.name ?? '')}" placeholder="e.g. github, filesystem, stripe"></div>
+              <div class="field mb-0" style="flex:1;min-width:180px"><label class="form-label">Server name</label><input class="form-input" id="mcp-name-${i}" value="${esc(m.name ?? '')}" placeholder="github, filesystem, stripe"></div>
               <div class="field mb-0" style="min-width:80px"><label class="form-label">Enabled</label><br><label class="toggle" style="margin-top:6px"><input type="checkbox" id="mcp-on-${i}" ${m.enabled !== false ? 'checked' : ''}><span class="toggle-track"></span></label></div>
               <button class="btn btn-danger btn-sm" style="margin-bottom:2px" onclick="App.removeMCP(${i})">✕ Remove</button>
             </div>
@@ -1158,7 +1202,7 @@ const App = (() => {
                 </select>
               </div>
               <div class="field mb-0" id="mcp-cmd-area-${i}" style="flex:1;min-width:200px;${m.transport && m.transport !== 'stdio' ? 'display:none' : ''}">
-                <label class="form-label">Command to start the server</label>
+                <label class="form-label">Start command</label>
                 <input class="form-input" id="mcp-cmd-${i}" value="${esc(m.command ?? '')}" placeholder="npx -y @modelcontextprotocol/server-github">
               </div>
               <div class="field mb-0" id="mcp-url-area-${i}" style="flex:1;min-width:200px;${!m.transport || m.transport === 'stdio' ? 'display:none' : ''}">
@@ -1167,7 +1211,7 @@ const App = (() => {
               </div>
             </div>
             <div class="field mb-0">
-              <label class="form-label">Environment variables (KEY=VALUE, one per line — stored in .env)</label>
+              <label class="form-label">Env vars (KEY=VALUE, one per line — stored in .env)</label>
               <textarea class="form-textarea" id="mcp-env-${i}" style="min-height:60px;font-size:11.5px;font-family:var(--font-mono)" placeholder="GITHUB_TOKEN=ghp_xxxx&#10;STRIPE_KEY=sk_xxxx">${esc((m.env ?? []).join('\n'))}</textarea>
             </div>
           </div>`).join('') || '<div class="empty-state" style="margin:0 0 14px">No MCP servers configured yet.</div>'}
@@ -1176,58 +1220,176 @@ const App = (() => {
           <button class="btn btn-ghost" onclick="App.addMCP()">+ Add MCP Server</button>
           <button class="btn btn-ink" onclick="App.saveMCP()">Save MCP Config</button>
         </div>
-        <div class="form-hint" style="margin-top:10px">Popular MCP servers: <code>@modelcontextprotocol/server-filesystem</code>, <code>@modelcontextprotocol/server-github</code>, <code>@modelcontextprotocol/server-postgres</code>, <code>@modelcontextprotocol/server-slack</code></div>
+        <div class="form-hint" style="margin-top:10px">Popular: <code>@modelcontextprotocol/server-filesystem</code>, <code>@modelcontextprotocol/server-github</code>, <code>@modelcontextprotocol/server-postgres</code></div>
       </div>
     </div>
     </div>`;
-  }
+  } // end viewSettings
+
 
   // ── Chat View ─────────────────────────────────────────────────────────────────
+  // Returns only providers that have an API key configured in .env
+  function getChatModels() {
+    const keyMap = {
+      anthropic: 'ANTHROPIC_API_KEY',
+      openai: 'OPENAI_API_KEY',
+      google: 'GEMINI_API_KEY',
+      openrouter: 'OPENROUTER_API_KEY',
+      groq: 'GROQ_API_KEY',
+    };
+    const result = [];
+    for (const [prov, p] of Object.entries(state.providers)) {
+      const envKey = keyMap[prov];
+      const hasKey = envKey && state.env[envKey] && state.env[envKey] !== '';
+      if (hasKey) {
+        p.models.forEach(m => result.push({ id: `${prov}/${m}`, name: m, provider: prov, label: p.label }));
+      }
+    }
+    // Always include the current configured model so it's selectable
+    const curModel = ag().model;
+    if (curModel && !result.find(m => m.id === curModel || curModel.endsWith(m.name))) {
+      const prov = providerOf(curModel);
+      result.unshift({ id: curModel, name: curModel.split('/').pop(), provider: prov, label: state.providers[prov]?.label ?? prov });
+    }
+    // If nothing configured just show the current model
+    if (!result.length) {
+      const cur = ag().model ?? 'anthropic/claude-sonnet-4-5';
+      result.push({ id: cur, name: cur.split('/').pop(), provider: providerOf(cur), label: 'Current' });
+    }
+    return result;
+  }
+
   function viewChat() {
     const agentName = state.cfg.agent?.name || 'Agent';
+    const models = getChatModels();
+    const activeModel = state.chatModel || ag().model || models[0]?.id || '';
+    const activeName = activeModel.split('/').pop();
+    const activeProv = models.find(m => m.id === activeModel)?.label ?? providerOf(activeModel);
+
+    const modelItems = models.map(m => `
+      <button class="chat-model-item ${m.id === activeModel ? 'active' : ''}" onclick="App.selectChatModel('${esc(m.id)}')">
+        <span class="chat-model-name">${esc(m.name)}</span>
+        <span class="chat-model-badge">${esc(m.label)}</span>
+        ${m.id === activeModel ? '<span class="chat-model-check">\u2713</span>' : ''}
+      </button>`).join('');
+
+    // Build command list grouped by category
+    const cmds = state.cmds || [];
+    const cmdsByCategory = {};
+    cmds.forEach(c => {
+      const cat = c.category || 'General';
+      if (!cmdsByCategory[cat]) cmdsByCategory[cat] = [];
+      cmdsByCategory[cat].push(c);
+    });
+    const cmdPanelItems = Object.entries(cmdsByCategory).map(([cat, items]) => `
+      <div class="cmd-panel-group" data-cat="${esc(cat)}">
+        <div class="cmd-panel-cat">${esc(cat)}</div>
+        ${items.map(c => {
+      const raw = c.syntax || c.id || c.command || c.name || '';
+      const label = raw.replace(/^\//, '');
+      const insertVal = raw.startsWith('/') ? raw : '/' + raw;
+      return `
+          <button class="cmd-panel-item" onclick="App.insertCmd('${esc(insertVal)}')">
+            <div class="cmd-panel-item-top">
+              <span class="cmd-panel-slash">/</span><span class="cmd-panel-name">${esc(label)}</span>
+            </div>
+            <div class="cmd-panel-desc">${esc(c.description || '')}</div>
+          </button>`;
+    }).join('')}
+      </div>`).join('');
+
     return `
     <div class="page-hd">
       <div>
-        <div class="page-title">💬 Chat</div>
-        <div class="page-sub">Send messages directly to ${esc(agentName)} — requires the gateway to be running</div>
+        <div class="page-title">\ud83d\udcac Chat</div>
+        <div class="page-sub">Direct conversation with ${esc(agentName)}</div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <span id="chat-status-pill" class="tag tag-muted">●&nbsp;Checking...</span>
-        <button class="btn btn-ghost btn-sm" onclick="App.clearChat()" title="Clear conversation">🗑 Clear</button>
+        <span id="chat-status-pill" class="tag tag-muted">\u25cf Checking...</span>
+        <button class="btn btn-ghost btn-sm" onclick="App.clearChat()" title="Clear conversation">\ud83d\uddd1 Clear</button>
       </div>
     </div>
 
-    <div class="chat-shell" id="chat-shell">
-      <div class="chat-messages" id="chat-messages">
-        <div class="chat-welcome">
-          <div class="chat-avatar">🤖</div>
-          <div class="chat-bubble chat-bubble-agent">
-            Hello! I'm <strong>${esc(agentName)}</strong>. The gateway must be running to receive replies.
-            Type a message below to start.
+    <div class="chat-layout">
+
+      <!-- LEFT: Chat area -->
+      <div class="chat-shell" id="chat-shell">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-welcome">
+            <div class="chat-avatar">\ud83e\udd16</div>
+            <div class="chat-bubble chat-bubble-agent">
+              Hey! I'm <strong>${esc(agentName)}</strong>. Gateway must be running for replies.
+              Model: <strong>${esc(activeName)}</strong> \u2014 change below.
+            </div>
+          </div>
+        </div>
+        <div id="chat-typing" class="chat-typing" style="display:none">
+          <span></span><span></span><span></span>
+        </div>
+        <div id="chat-file-strip" class="chat-file-strip" style="display:none"></div>
+        <div class="chat-input-box" id="chat-input-box">
+          <textarea class="chat-input" id="chat-input"
+            placeholder="Type a message or /command\u2026 (Enter to send, Shift+Enter for newline)"
+            rows="1" oninput="App.chatAutoResize(this)" onkeydown="App.chatKeydown(event)"></textarea>
+          <div class="chat-input-footer">
+            <div class="chat-input-left">
+              <label class="chat-attach-btn" title="Attach files">
+                <input type="file" id="chat-file-input" multiple style="display:none" onchange="App.handleChatFiles(this.files)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </label>
+              <div class="chat-model-selector" id="chat-model-selector">
+                <button class="chat-model-trigger" onclick="App.toggleModelMenu()" title="Switch model">
+                  <span id="chat-model-label">${esc(activeName)}</span>
+                  <span class="chat-model-provider">${esc(activeProv)}</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="chat-model-menu" id="chat-model-menu" style="display:none">
+                  <div class="chat-model-menu-hd">Switch Model</div>
+                  <div class="chat-model-menu-hint">${models.length === 1 ? 'Add API keys in Settings to unlock more.' : `${models.length} models available`}</div>
+                  ${modelItems}
+                  <div class="chat-model-menu-footer">
+                    <button class="chat-model-settings-link" onclick="App.showView('settings')">\u2699 Add API keys in Settings</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button class="chat-send-btn" id="chat-send-btn" onclick="App.sendChat()" title="Send">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
           </div>
         </div>
       </div>
-      <div id="chat-typing" class="chat-typing" style="display:none">
-        <span></span><span></span><span></span>
+
+      <!-- RIGHT: Command panel -->
+      <div class="cmd-panel" id="cmd-panel">
+        <div class="cmd-panel-hd">
+          <span class="cmd-panel-title">\u26a1 Commands</span>
+          <span class="cmd-panel-count">${cmds.length}</span>
+        </div>
+        <div class="cmd-panel-search-wrap">
+          <svg class="cmd-panel-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="cmd-panel-search" id="cmd-panel-search" type="text" placeholder="Search commands\u2026" oninput="App.chatCmdSearch(this.value)">
+        </div>
+        <div class="cmd-panel-list" id="cmd-panel-list">
+          ${cmds.length === 0 ? `
+            <div class="cmd-panel-empty">
+              <div style="font-size:28px;margin-bottom:8px">\ud83d\udccb</div>
+              <div style="color:var(--txt3);font-size:13px">No commands yet</div>
+              <button class="btn btn-ghost btn-sm" style="margin-top:10px;font-size:12px" onclick="App.showView('commands')">Add Commands \u2192</button>
+            </div>` : cmdPanelItems}
+        </div>
+        <div class="cmd-panel-footer">
+          <button class="btn btn-ghost btn-sm" onclick="App.showView('commands')" style="width:100%;font-size:11px">Manage Commands \u2192</button>
+        </div>
       </div>
-      <form class="chat-input-bar" id="chat-form" onsubmit="return false">
-        <textarea
-          class="chat-input"
-          id="chat-input"
-          placeholder="Type a message… (Enter to send, Shift+Enter for newline)"
-          rows="1"
-          oninput="App.chatAutoResize(this)"
-          onkeydown="App.chatKeydown(event)"
-        ></textarea>
-        <button class="btn btn-ink chat-send-btn" id="chat-send-btn" onclick="App.sendChat()">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        </button>
-      </form>
+
     </div>`;
   }
 
+
   // loads history and polls gateway status after chat view is rendered
   async function initChat() {
+
     // Gateway status pill
     const pill = document.getElementById('chat-status-pill');
     try {
@@ -1295,7 +1457,8 @@ const App = (() => {
     if (box) box.scrollTop = box.scrollHeight;
 
     try {
-      const r = await api('POST', '/api/chat', { message: text });
+      const model = state.chatModel || ag().model;
+      const r = await api('POST', '/api/chat', { message: text, model });
       if (typing) typing.style.display = 'none';
       if (r?.reply) {
         appendChatBubble('assistant', r.reply.text, r.reply.ts);
@@ -1321,12 +1484,101 @@ const App = (() => {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   }
 
+  // ── Chat model + file handlers ─────────────────────────────────────────────
+  function selectChatModel(modelId) {
+    state.chatModel = modelId;
+    // Update trigger label without full re-render
+    const lbl = document.getElementById('chat-model-label');
+    if (lbl) lbl.textContent = modelId.split('/').pop();
+    const models = getChatModels();
+    const provLabel = models.find(m => m.id === modelId)?.label ?? providerOf(modelId);
+    const provEl = document.querySelector('.chat-model-provider');
+    if (provEl) provEl.textContent = provLabel;
+    // Refresh active state on menu items
+    document.querySelectorAll('.chat-model-item').forEach(btn => {
+      const isActive = btn.onclick?.toString().includes(modelId);
+      btn.classList.toggle('active', isActive);
+    });
+    toggleModelMenu(false);
+    toast(`Model: ${modelId.split('/').pop()}`);
+  }
+
+  function toggleModelMenu(forceState) {
+    const menu = document.getElementById('chat-model-menu');
+    if (!menu) return;
+    const open = forceState !== undefined ? forceState : menu.style.display === 'none';
+    menu.style.display = open ? 'block' : 'none';
+    if (open) {
+      // Close on outside click
+      const close = e => {
+        if (!document.getElementById('chat-model-selector')?.contains(e.target)) {
+          menu.style.display = 'none';
+          document.removeEventListener('click', close);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', close), 10);
+    }
+  }
+
+  function handleChatFiles(files) {
+    if (!files || !files.length) return;
+    state.chatFiles = [...(state.chatFiles || []), ...Array.from(files)];
+    const strip = document.getElementById('chat-file-strip');
+    if (!strip) return;
+    strip.style.display = 'flex';
+    strip.innerHTML = state.chatFiles.map((f, i) => `
+      <div class="chat-file-chip">
+        <span class="chat-file-chip-name">${esc(f.name)}</span>
+        <span class="chat-file-chip-size">${(f.size / 1024).toFixed(0)}KB</span>
+        <button onclick="App.removeChatFile(${i})" title="Remove">×</button>
+      </div>`).join('');
+  }
+
+  function removeChatFile(idx) {
+    state.chatFiles.splice(idx, 1);
+    handleChatFiles([]); // re-render strip
+    if (!state.chatFiles.length) {
+      const strip = document.getElementById('chat-file-strip');
+      if (strip) strip.style.display = 'none';
+    }
+  }
+
+  // Filter command panel by search query
+  function chatCmdSearch(q) {
+    const list = document.getElementById('cmd-panel-list');
+    if (!list) return;
+    const query = q.toLowerCase().trim();
+    list.querySelectorAll('.cmd-panel-item').forEach(btn => {
+      const text = btn.textContent.toLowerCase();
+      btn.style.display = (!query || text.includes(query)) ? '' : 'none';
+    });
+    list.querySelectorAll('.cmd-panel-group').forEach(grp => {
+      const anyVisible = [...grp.querySelectorAll('.cmd-panel-item')].some(b => b.style.display !== 'none');
+      grp.style.display = anyVisible ? '' : 'none';
+    });
+  }
+
+  // Insert a command into the chat input and focus it
+  function insertCmd(cmd) {
+    const inp = document.getElementById('chat-input');
+    if (!inp) return;
+    const text = inp.value;
+    // Prepend slash if not already there
+    const cmdText = cmd.startsWith('/') ? cmd : '/' + cmd;
+    inp.value = text ? text + ' ' + cmdText + ' ' : cmdText + ' ';
+    inp.focus();
+    inp.dispatchEvent(new Event('input')); // trigger autoresize
+    // Scroll input into view
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  }
+
   async function clearChat() {
     if (!confirm('Clear conversation history?')) return;
     await api('DELETE', '/api/chat/history');
     const box = document.getElementById('chat-messages');
     if (box) box.innerHTML = `<div class="chat-welcome"><div class="chat-avatar">🤖</div><div class="chat-bubble chat-bubble-agent">Conversation cleared. How can I help?</div></div>`;
   }
+
 
   // ── Render ───────────────────────────────────────────────────────────────────
   const VIEWS = { chat: viewChat, overview: viewOverview, channels: viewChannels, agent: viewAgent, settings: viewSettings, commands: viewCommands, workspace: viewWorkspace, antfarm: viewAntfarm, gateway: viewGateway, logs: viewLogs };
@@ -1372,7 +1624,9 @@ const App = (() => {
 
   async function saveModel() {
     const prov = val('m-prov');
-    const model = `${prov}/${val('m-model')}`;
+    const modelName = resolveModel('m-model');
+    if (!modelName) { toast('Select or type a model', 'error'); return; }
+    const model = modelName.includes('/') ? modelName : `${prov}/${modelName}`;
     const apiKey = val('m-apikey').trim();
     const r = await api('POST', '/api/model', {
       provider: prov, model, apiKey,
@@ -1380,7 +1634,7 @@ const App = (() => {
       maxTokens: +val('m-maxtok') || 8192, contextWindow: +val('m-context') || 200000,
       thinkingDepth: val('m-think'), format: val('m-format'), verbose: val('m-verbose') === 'on',
     });
-    if (r.ok) { state.cfg = r.config; toast(`Model: ${val('m-model')}`); } else toast(r.error || 'Error', 'error');
+    if (r.ok) { state.cfg = r.config; toast(`Model: ${model}`); } else toast(r.error || 'Error', 'error');
   }
 
   async function saveIdentity() {
@@ -1407,6 +1661,17 @@ const App = (() => {
     if (!v) { toast('Enter a value', 'error'); return; }
     await saveEnv({ [envKey]: v }, label);
     document.getElementById(`key-${envKey}`).value = '';
+  }
+
+  async function saveGatewayToken() {
+    const newToken = val('gw-token-new').trim();
+    const ttl = +val('gw-token-ttl') || 24;
+    const patch = { gateway: { tokenTTLHours: ttl } };
+    if (newToken) patch.gateway.authToken = newToken;
+    await saveCfg(patch, 'Gateway Token');
+    const el = document.getElementById('gw-token-new');
+    if (el) el.value = '';
+    await render();
   }
 
   async function saveGateway() {
@@ -1690,6 +1955,25 @@ const App = (() => {
     const cur = document.getElementById(modelId)?.value;
     const sel = document.getElementById(modelId);
     if (sel) sel.innerHTML = modelOpts(prov, cur);
+    const customBox = document.getElementById(modelId + '-custom');
+    if (customBox) customBox.style.display = '';
+  }
+
+  function onModelChange(selectId) {
+    const sel = document.getElementById(selectId);
+    const customBox = document.getElementById(selectId + '-custom');
+    if (!sel || !customBox) return;
+    customBox.style.display = sel.value === '__custom' ? '' : 'none';
+  }
+
+  function resolveModel(selectId) {
+    // Returns the final model string — either the selected option or the custom text box value
+    const sel = document.getElementById(selectId);
+    if (!sel) return '';
+    if (sel.value === '__custom') {
+      return document.getElementById(selectId + '-custom')?.value.trim() ?? '';
+    }
+    return sel.value;
   }
 
   async function openFile(name) {
@@ -1800,8 +2084,8 @@ const App = (() => {
 
   return {
     showView, saveWA, saveTG, saveWebhook, saveModel, saveIdentity, saveHeartbeat,
-    saveFallbacks, saveToolPerms, saveKey, saveGateway, saveGatewayAuth, saveRateLimit,
-    onProvChange, openFile, closeFile, saveFile, openCmd, setCategory, onSearch,
+    saveFallbacks, saveToolPerms, saveKey, saveGateway, saveGatewayAuth, saveGatewayToken, saveRateLimit,
+    onProvChange, onModelChange, resolveModel, openFile, closeFile, saveFile, openCmd, setCategory, onSearch,
     checkAntfarm, runWorkflow, loadLogs, pairWA, copy, loadAll, render, init,
     // Settings view
     saveCron, saveSession, saveCompaction, saveContextPruning, saveTools, setAllTools,
@@ -1812,6 +2096,8 @@ const App = (() => {
     saveMCP, addMCP, removeMCP, onMCPTransportChange,
     // Chat
     sendChat, chatKeydown, chatAutoResize, clearChat,
+    selectChatModel, toggleModelMenu, handleChatFiles, removeChatFile,
+    chatCmdSearch, insertCmd,
   };
 })();
 
